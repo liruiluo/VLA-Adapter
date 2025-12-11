@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.cpython-*.pyc
 
 # C extensions
 *.so
@@ -151,3 +152,26 @@ data/
 # Rollout videos and wandb logs
 rollouts/
 wandb/
+
+# Local training artifacts
+outputs/
+logs/
+experiments/logs/
+eval_logs/
+
+# Model and cache directories
+hf_cache/
+timm_cache/
+
+# External benchmarks / repos checked out locally
+LIBERO/
+
+# Local pretrained model artifacts
+pretrained_models/**/checkpoints/
+pretrained_models/**/run-metrics.jsonl
+pretrained_models/**/prism-*.jsonl
+pretrained_models/configs/config.json.back.*
+pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b/
+
+# Local build metadata
+vla_adapter.egg-info/
