@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 本脚本假设所在目录就是 VLA-Adapter 根目录。
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 本脚本假设「提交 / 执行脚本」时当前工作目录就是 VLA-Adapter 根目录。
+# 在 Slurm 下，脚本会被拷贝到 spool 目录，但 CWD 会保持为提交时的目录，
+# 所以这里直接用 $PWD 更稳，不再依赖 BASH_SOURCE。
+ROOT_DIR="${PWD}"
 cd "${ROOT_DIR}"
 
 echo "[INFO] Repo root: ${ROOT_DIR}"

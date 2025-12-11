@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 在 Slurm 作业中，脚本会被复制到 spool 目录执行，但当前工作目录
+# 会保持为提交作业时所在的目录，所以这里直接使用 $PWD 作为仓库根目录。
+ROOT_DIR="${PWD}"
 cd "${ROOT_DIR}"
 
 if [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
