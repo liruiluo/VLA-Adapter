@@ -88,6 +88,9 @@ class GenerateConfig:
     #################################################################################################################
     model_family: str = "openvla"                    # Model family
     pretrained_checkpoint: Union[str, Path] = ""     # Pretrained checkpoint path
+    # For MoE-LoRA / custom checkpoints, this should point to the
+    # base OpenVLA config directory (e.g. `pretrained_models/configs`)
+    config_file_path: Union[str, Path] = "pretrained_models/configs"
     use_l1_regression: bool = True                   # If True, uses continuous action head with L1 regression objective
     use_minivlm: bool = True                         # If True, uses minivlm
     num_diffusion_steps: int = 50                    # (When `diffusion==True`) Number of diffusion steps for inference
@@ -101,6 +104,14 @@ class GenerateConfig:
 
     load_in_8bit: bool = False                       # (For OpenVLA only) Load with 8-bit quantization
     load_in_4bit: bool = False                       # (For OpenVLA only) Load with 4-bit quantization
+
+    # MoE-LoRA adapter (optional)
+    use_moe_lora: bool = False                       # If True, load MoE-LoRA adapter from checkpoint directory
+    moe_num_experts: int = 0                         # Number of experts used during fine-tuning
+    moe_target_modules: str = "all-linear"           # Substrings or 'all-linear' (must match training)
+    moe_top_k: int = 0                               # If >0 and < num_experts, use Top-K gating
+    lora_rank: int = 8                               # LoRA rank per expert (must match training)
+    lora_dropout: float = 0.05                       # LoRA dropout used during training (irrelevant at eval)
 
     #################################################################################################################
     # LIBERO environment-specific parameters

@@ -104,16 +104,20 @@ class FinetuneConfig:
     image_aug: bool = True                           # If True, trains with image augmentations (HIGHLY RECOMMENDED)
     diffusion_sample_freq: int = 50                  # (When `use_diffusion==True`) Frequency for sampling in steps
 
-    # LoRA
-    use_lora: bool = False                           # If True, uses LoRA fine-tuning
-    lora_rank: int = 32                              # Rank of LoRA weight matrix
-    lora_dropout: float = 0.0                        # Dropout applied to LoRA weights
+    # Adapter / Fine-tuning strategy
+    use_lora: bool = False                           # If True, uses standard LoRA fine-tuning
+    lora_rank: int = 32                              # Rank of LoRA weight matrix (also used for MoE-LoRA)
+    lora_dropout: float = 0.0                        # Dropout applied to LoRA / MoE-LoRA weights
     merge_lora_during_training: bool = False         # If True, merges LoRA weights and saves result during training
                                                      #   Note: Merging can be very slow on some machines. If so, set to
                                                      #         False and merge final checkpoint offline!
+    use_moe_lora: bool = False                       # If True, uses MoE-LoRA instead of standard LoRA
+    moe_num_experts: int = 4                         # Number of experts for MoE-LoRA
+    moe_target_modules: str = "all-linear"           # Comma-separated substrings for module names to wrap, or 'all-linear'
+    moe_top_k: int = 0                               # If >0 and < num_experts, use Top-K gating; otherwise dense gating
 
     # Full Finetune
-    use_fz: bool = False                             # If True, uses LoRA fine-tuning
+    use_fz: bool = False                             # If True, uses full fine-tuning (no LoRA / MoE-LoRA)
 
     # Logging
     wandb_entity: str = "your-wandb-entity"          # Name of WandB entity
@@ -184,6 +188,8 @@ def get_run_id(cfg) -> str:
             run_id += f"+frozen+dropout-{cfg.lora_dropout}"
         if cfg.use_lora:
             run_id += f"+lora-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
+        if cfg.use_moe_lora:
+            run_id += f"+moe-lora-e{cfg.moe_num_experts}-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
         if cfg.image_aug:
             run_id += "--image_aug"
         if cfg.run_id_note is not None:
@@ -545,13 +551,19 @@ def save_training_checkpoint(
 
     # Save model components (main process only)
     if distributed_state.is_main_process:
-        # Save processor and LoRA adapter
+        # Save processor and LoRA/MoE-LoRA adapter or full model depending on strategy
         processor.save_pretrained(checkpoint_dir)
 
         if cfg.use_fz:
-            vla.module.save_pretrained(checkpoint_dir) # directly save checkpoint without lora
-        else:
+            # Full finetune: save full model
+            vla.module.save_pretrained(checkpoint_dir)
+        elif cfg.use_lora:
+            # Standard LoRA: save only adapter
             vla.module.save_pretrained(adapter_dir)
+        elif cfg.use_moe_lora:
+            # MoE-LoRA: save a plain state_dict for the (DDP-wrapped) model
+            moe_state = remove_ddp_in_checkpoint(vla.state_dict())
+            torch.save(moe_state, checkpoint_dir / f"moe_lora--{checkpoint_name_suffix}")
 
         # Save other components
         if cfg.use_proprio and proprio_projector is not None:
@@ -829,10 +841,37 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     # vla.set_version(cfg.version)
 
-    if cfg.use_lora:
+    # Configure adapter strategy: MoE-LoRA > standard LoRA > full finetune
+    if cfg.use_moe_lora:
+        # Freeze all existing parameters; MoE-LoRA modules will introduce new trainable params
+        vla.requires_grad_(False)
+
+        from prismatic.util.moe_lora import apply_moe_lora
+
+        target_modules = (
+            [m.strip() for m in cfg.moe_target_modules.split(",") if m.strip()]
+            if cfg.moe_target_modules
+            else ["all-linear"]
+        )
+        top_k = cfg.moe_top_k if cfg.moe_top_k > 0 else None
+        apply_moe_lora(
+            vla,
+            num_experts=cfg.moe_num_experts,
+            r=cfg.lora_rank,
+            lora_alpha=2 * cfg.lora_rank,
+            lora_dropout=cfg.lora_dropout,
+            target_modules=target_modules,
+            top_k=top_k,
+        )
+        # Always allow action query parameters to be trained
+        for name, param in vla.named_parameters():
+            if "action_queries" in name:
+                param.requires_grad = True
+
+    elif cfg.use_lora:
         lora_config = LoraConfig(
             r=cfg.lora_rank,
-            lora_alpha= 2 * cfg.lora_rank,
+            lora_alpha=2 * cfg.lora_rank,
             lora_dropout=cfg.lora_dropout,
             target_modules="all-linear",
             init_lora_weights="gaussian",
@@ -844,6 +883,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         vla.print_trainable_parameters()
 
     else:
+        # No adapters: optionally still allow action queries to be trained
         for name, param in vla.named_parameters():
             if "action_queries" in name:
                 param.requires_grad = True

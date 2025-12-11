@@ -273,44 +273,95 @@ def get_vla(cfg: Any) -> torch.nn.Module:
     """
     Load and initialize the VLA model from checkpoint.
 
-    Args:
-        cfg: Configuration object
-
-    Returns:
-        torch.nn.Module: The initialized VLA model
+    Supports two modes:
+      1) Standard: `cfg.pretrained_checkpoint` is a full HF-style directory
+         containing config + weights (e.g. LIBERO-Object-Pro).
+      2) MoE-LoRA: `cfg.pretrained_checkpoint` is a fine-tuning run directory
+         containing `moe_lora--*_checkpoint.pt`, processor files, and
+         dataset_statistics.json; base config is taken from `cfg.config_file_path`.
     """
     print("Instantiating pretrained VLA policy...")
 
-    # If loading a locally stored pretrained checkpoint, check whether config or model files
-    # need to be synced so that any changes the user makes to the VLA modeling code will
-    # actually go into effect
-    # If loading a pretrained checkpoint from Hugging Face Hub, we just assume that the policy
-    # will be used as is, with its original modeling logic
-    if not model_is_on_hf_hub(cfg.pretrained_checkpoint):
-        # Register OpenVLA model to HF Auto Classes (not needed if the model is on HF Hub)
-        AutoConfig.register("openvla", OpenVLAConfig)
-        AutoImageProcessor.register(OpenVLAConfig, PrismaticImageProcessor)
-        AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
-        AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
+    use_moe_lora = getattr(cfg, "use_moe_lora", False)
 
-        # Update config.json and sync model files
-        update_auto_map(cfg.pretrained_checkpoint)
-        check_model_logic_mismatch(cfg.pretrained_checkpoint)
+    if use_moe_lora:
+        # --- MoE-LoRA path: reconstruct base from config + load MoE adapter ---
+        base_config_path = str(getattr(cfg, "config_file_path", "pretrained_models/configs")).rstrip("/")
 
-    # Load the model
-    vla = AutoModelForVision2Seq.from_pretrained(
-        cfg.pretrained_checkpoint,
-        # attn_implementation="flash_attention_2",
-        torch_dtype=torch.bfloat16,
-        load_in_8bit=cfg.load_in_8bit,
-        load_in_4bit=cfg.load_in_4bit,
-        low_cpu_mem_usage=False,
-        trust_remote_code=False,
-    )
+        # Register OpenVLA classes and sync modeling files for the base config
+        if not model_is_on_hf_hub(base_config_path):
+            AutoConfig.register("openvla", OpenVLAConfig)
+            AutoImageProcessor.register(OpenVLAConfig, PrismaticImageProcessor)
+            AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
+            AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
 
-    # If using FiLM, wrap the vision backbone to allow for infusion of language inputs
-    if cfg.use_film:
-        vla = _apply_film_to_vla(vla, cfg)
+            update_auto_map(base_config_path)
+            check_model_logic_mismatch(base_config_path)
+
+        # Build model from config only; weights will come from the MoE-LoRA checkpoint
+        config = AutoConfig.from_pretrained(base_config_path, trust_remote_code=False)
+        vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16)
+
+        # Apply MoE-LoRA adapters at the same locations as standard LoRA
+        from prismatic.util.moe_lora import apply_moe_lora
+
+        target_modules = (
+            [m.strip() for m in getattr(cfg, "moe_target_modules", "all-linear").split(",") if m.strip()]
+        )
+        top_k = getattr(cfg, "moe_top_k", 0)
+        top_k = top_k if (top_k is not None and top_k > 0) else None
+
+        apply_moe_lora(
+            vla,
+            num_experts=getattr(cfg, "moe_num_experts", 0),
+            r=getattr(cfg, "lora_rank", 8),
+            lora_alpha=2 * getattr(cfg, "lora_rank", 8),
+            lora_dropout=getattr(cfg, "lora_dropout", 0.0),
+            top_k=top_k,
+            target_modules=target_modules,
+        )
+
+        # Load MoE-LoRA weights (full model state) from checkpoint directory
+        moe_ckpt_path = find_checkpoint_file(cfg.pretrained_checkpoint, "moe_lora")
+        moe_state = torch.load(moe_ckpt_path, weights_only=True, map_location="cpu")
+        missing, unexpected = vla.load_state_dict(moe_state, strict=False)
+        print(f"Loaded MoE-LoRA checkpoint from: {moe_ckpt_path}")
+        if missing:
+            print(f"  Missing keys in MoE-LoRA state_dict: {len(missing)}")
+        if unexpected:
+            print(f"  Unexpected keys in MoE-LoRA state_dict: {len(unexpected)}")
+
+    else:
+        # --- Standard path: checkpoint directory contains full HF model ---
+        # If loading a locally stored pretrained checkpoint, check whether config or model files
+        # need to be synced so that any changes the user makes to the VLA modeling code will
+        # actually go into effect
+        # If loading a pretrained checkpoint from Hugging Face Hub, we just assume that the policy
+        # will be used as is, with its original modeling logic
+        if not model_is_on_hf_hub(cfg.pretrained_checkpoint):
+            # Register OpenVLA model to HF Auto Classes (not needed if the model is on HF Hub)
+            AutoConfig.register("openvla", OpenVLAConfig)
+            AutoImageProcessor.register(OpenVLAConfig, PrismaticImageProcessor)
+            AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
+            AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
+
+            # Update config.json and sync model files
+            update_auto_map(cfg.pretrained_checkpoint)
+            check_model_logic_mismatch(cfg.pretrained_checkpoint)
+
+        # Load the model
+        vla = AutoModelForVision2Seq.from_pretrained(
+            cfg.pretrained_checkpoint,
+            torch_dtype=torch.bfloat16,
+            load_in_8bit=cfg.load_in_8bit,
+            load_in_4bit=cfg.load_in_4bit,
+            low_cpu_mem_usage=False,
+            trust_remote_code=False,
+        )
+
+        # If using FiLM, wrap the vision backbone to allow for infusion of language inputs
+        if cfg.use_film:
+            vla = _apply_film_to_vla(vla, cfg)
 
     # Set number of images in model input
     vla.vision_backbone.set_num_images_in_input(cfg.num_images_in_input)
@@ -318,10 +369,10 @@ def get_vla(cfg: Any) -> torch.nn.Module:
     vla.eval()
 
     # Move model to device if not using quantization
-    if not cfg.load_in_8bit and not cfg.load_in_4bit:
+    if not getattr(cfg, "load_in_8bit", False) and not getattr(cfg, "load_in_4bit", False):
         vla = vla.to(DEVICE)
 
-    # Load dataset stats for action normalization
+    # Load dataset stats for action normalization (from the fine-tuning checkpoint dir)
     _load_dataset_stats(vla, cfg.pretrained_checkpoint)
 
     return vla
