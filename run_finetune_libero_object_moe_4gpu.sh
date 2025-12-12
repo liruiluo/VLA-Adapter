@@ -53,7 +53,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --lora_dropout 0.05 \
   --use_fz False \
   --num_steps_before_decay 150000 \
-  --max_steps 150005 \
+  --max_steps 5000 \
   --save_freq 5000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training False \
