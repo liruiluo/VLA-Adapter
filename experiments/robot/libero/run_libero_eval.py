@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import traceback
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
@@ -375,6 +376,7 @@ def run_episode(
 
     except Exception as e:
         log_message(f"Episode error: {e}", log_file)
+        log_message(traceback.format_exc(), log_file)
 
     return success, replay_images
 

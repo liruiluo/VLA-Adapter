@@ -20,7 +20,7 @@ PY_BIN="${ROOT_DIR}/env/bin/python"
 # === MoE-LoRA LIBERO-Object eval (local smoke test) ===
 
 # MoE-LoRA finetune checkpoint directory (adjust if you run a new job)
-CKPT_DIR="outputs/configs+libero_object_no_noops+b32+lr-0.0002+moe-lora-e3-r8+dropout-0.05--image_aug--VLA-Adapter-MoELoRA--libero_object_no_noops--2025-12-11_15-44-52--50_chkpt"
+CKPT_DIR="outputs/configs+libero_object_no_noops+b16+lr-0.0002+moe-lora-e3-r64+dropout-0.05--image_aug--VLA-Adapter-MoELoRA--object-4GPU--2025-12-13_10-01-16--5000_chkpt"
 
 # Base OpenVLA config used to reconstruct the model skeleton
 CONFIG_DIR="pretrained_models/configs"
@@ -33,7 +33,7 @@ CUDA_VISIBLE_DEVICES=0 "${PY_BIN}" experiments/robot/libero/run_libero_eval.py \
   --moe_num_experts 3 \
   --moe_top_k 2 \
   --moe_target_modules "all-linear" \
-  --lora_rank 8 \
+  --lora_rank 64 \
   --lora_dropout 0.05 \
   --use_l1_regression True \
   --use_minivlm True \

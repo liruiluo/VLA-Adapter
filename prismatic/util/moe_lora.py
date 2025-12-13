@@ -44,6 +44,8 @@ class MoELoRALinear(nn.Module):
         self.base = base_linear
         self.in_features = base_linear.in_features
         self.out_features = base_linear.out_features
+        self._base_dtype = base_linear.weight.dtype
+        self._base_device = base_linear.weight.device
 
         self.num_experts = int(num_experts)
         self.r = int(r)
@@ -64,10 +66,10 @@ class MoELoRALinear(nn.Module):
         # Expert-specific low-rank matrices
         # A: [E, R, in_features], B: [E, out_features, R]
         self.A = nn.Parameter(
-            torch.empty(self.num_experts, self.r, self.in_features)
+            torch.empty(self.num_experts, self.r, self.in_features, device=self._base_device, dtype=self._base_dtype)
         )
         self.B = nn.Parameter(
-            torch.empty(self.num_experts, self.out_features, self.r)
+            torch.empty(self.num_experts, self.out_features, self.r, device=self._base_device, dtype=self._base_dtype)
         )
 
         # Simple router over experts: x -> logits[E]
@@ -80,13 +82,8 @@ class MoELoRALinear(nn.Module):
             p.requires_grad = False
 
         self.register_buffer("_disabled", torch.tensor(0, dtype=torch.uint8))
-
-        # Ensure newly created parameters live on the same device as base
-        try:
-            base_device = next(self.base.parameters()).device
-            self.to(base_device)
-        except StopIteration:
-            pass
+        # Ensure dtype/device always matches the wrapped base Linear
+        self.to(device=self._base_device, dtype=self._base_dtype)
 
     def reset_parameters(self) -> None:
         # LoRA-style init: A ~ small random, B ~= 0, router ~= 0
@@ -176,12 +173,6 @@ def apply_moe_lora(
         qual_name = f"{prefix}.{name}" if prefix else name
 
         if isinstance(child, nn.Linear) and _should_wrap(qual_name, target_modules):
-            # Preserve device placement of the original Linear
-            try:
-                device = next(child.parameters()).device
-            except StopIteration:
-                device = None
-
             wrapped = MoELoRALinear(
                 child,
                 num_experts=num_experts,
@@ -190,8 +181,6 @@ def apply_moe_lora(
                 lora_dropout=lora_dropout,
                 top_k=top_k,
             )
-            if device is not None:
-                wrapped = wrapped.to(device)
             setattr(module, name, wrapped)
         else:
             apply_moe_lora(
