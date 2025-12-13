@@ -46,10 +46,10 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --image_aug True \
   --use_lora False \
   --use_moe_lora True \
-  --moe_num_experts 4 \
+  --moe_num_experts 3 \
   --moe_target_modules "all-linear" \
   --moe_top_k 2 \
-  --lora_rank 32 \
+  --lora_rank 64 \
   --lora_dropout 0.05 \
   --use_fz False \
   --num_steps_before_decay 150000 \
@@ -57,8 +57,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --save_freq 5000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training False \
-  --batch_size 16 \
-  --grad_accumulation_steps 1 \
+  --batch_size 8 \
+  --grad_accumulation_steps 2 \
   --learning_rate 2e-4 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \

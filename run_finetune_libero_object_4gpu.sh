@@ -46,7 +46,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --use_fz False \
   --use_minivlm True \
   --image_aug True \
-  --num_steps_before_decay 150000 \
+  --num_steps_before_decay 5000 \
   --max_steps 150005 \
   --save_freq 5000 \
   --save_latest_checkpoint_only False \
