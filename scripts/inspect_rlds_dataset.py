@@ -13,6 +13,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 from collections import Counter
@@ -97,6 +98,8 @@ def inspect_dataset(
     save_samples_dir: Optional[Path],
     sample_every_n_episodes: int,
     near_zero_eps: float,
+    write_tasks_json: Optional[Path],
+    write_episodes_csv: Optional[Path],
 ) -> None:
     tf.get_logger().setLevel("ERROR")
 
@@ -130,6 +133,8 @@ def inspect_dataset(
 
     episode_lengths: list[int] = []
     instruction_counter: Counter[str] = Counter()
+    episodes_with_inconsistent_instruction = 0
+    episode_records: list[dict] = []
     total_steps = 0
 
     action_dim_values: list[np.ndarray] = []
@@ -146,6 +151,14 @@ def inspect_dataset(
         # When using tfds.as_numpy, nested tf.data.Dataset becomes a python iterable of dicts.
         ep_len = 0
 
+        episode_file_path = None
+        if "episode_metadata" in episode and isinstance(episode["episode_metadata"], dict):
+            if "file_path" in episode["episode_metadata"]:
+                episode_file_path = _maybe_decode_bytes(episode["episode_metadata"]["file_path"])
+
+        episode_instruction = None
+        instruction_mismatch = False
+
         for st_idx, step in enumerate(steps):
             if max_steps_per_episode is not None and st_idx >= max_steps_per_episode:
                 break
@@ -153,8 +166,13 @@ def inspect_dataset(
             ep_len += 1
             total_steps += 1
 
-            if st_idx == 0 and "language_instruction" in step:
-                instruction_counter[_maybe_decode_bytes(step["language_instruction"]).strip()] += 1
+            if "language_instruction" in step:
+                this_instruction = _maybe_decode_bytes(step["language_instruction"]).strip()
+                if st_idx == 0:
+                    episode_instruction = this_instruction
+                    instruction_counter[this_instruction] += 1
+                elif episode_instruction is not None and this_instruction != episode_instruction:
+                    instruction_mismatch = True
 
             if "action" in step:
                 a = np.asarray(step["action"], dtype=np.float32)
@@ -185,10 +203,24 @@ def inspect_dataset(
                     _save_image(obs["wrist_image"], save_samples_dir / f"ep{ep_idx:04d}_step0_wrist.png")
 
         episode_lengths.append(ep_len)
+        if instruction_mismatch:
+            episodes_with_inconsistent_instruction += 1
+
+        episode_records.append(
+            {
+                "episode_idx": ep_idx,
+                "num_steps": ep_len,
+                "language_instruction": episode_instruction,
+                "file_path": episode_file_path,
+                "instruction_mismatch": instruction_mismatch,
+            }
+        )
 
     print("\n=== Summary ===")
     print(f"Episodes scanned: {len(episode_lengths)}")
     print(f"Total steps scanned: {total_steps}")
+    if episodes_with_inconsistent_instruction:
+        print(f"WARNING: episodes with inconsistent language_instruction: {episodes_with_inconsistent_instruction}")
 
     if episode_lengths:
         lens = np.asarray(episode_lengths, dtype=np.int64)
@@ -200,6 +232,35 @@ def inspect_dataset(
     print("\nTop language instructions (by episode):")
     for text, c in instruction_counter.most_common(20):
         print(f"  {c:5d}  {text}")
+
+    if write_tasks_json is not None:
+        write_tasks_json.parent.mkdir(parents=True, exist_ok=True)
+        tasks = [{"task_id": i, "language_instruction": t, "num_episodes": c} for i, (t, c) in enumerate(instruction_counter.most_common())]
+        with write_tasks_json.open("w") as f:
+            json.dump(
+                {
+                    "builder_dir": str(builder_dir),
+                    "split": split,
+                    "num_tasks": len(tasks),
+                    "tasks": tasks,
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+        print(f"\nWrote task list to: {write_tasks_json}")
+
+    if write_episodes_csv is not None:
+        write_episodes_csv.parent.mkdir(parents=True, exist_ok=True)
+        with write_episodes_csv.open("w", newline="") as f:
+            w = csv.DictWriter(
+                f,
+                fieldnames=["episode_idx", "num_steps", "language_instruction", "file_path", "instruction_mismatch"],
+            )
+            w.writeheader()
+            for r in episode_records:
+                w.writerow(r)
+        print(f"Wrote per-episode index to: {write_episodes_csv}")
 
     if action_dim_values:
         actions = np.stack(action_dim_values, axis=0)  # [N, 7]
@@ -249,6 +310,18 @@ def main() -> None:
     parser.add_argument("--save_samples_dir", type=Path, default=None)
     parser.add_argument("--sample_every_n_episodes", type=int, default=25)
     parser.add_argument("--near_zero_eps", type=float, default=1e-3)
+    parser.add_argument(
+        "--write_tasks_json",
+        type=Path,
+        default=None,
+        help="Optional path to write a JSON summary of unique language_instruction values (task candidates).",
+    )
+    parser.add_argument(
+        "--write_episodes_csv",
+        type=Path,
+        default=None,
+        help="Optional path to write a CSV mapping episode_idx -> language_instruction/file_path/num_steps.",
+    )
     args = parser.parse_args()
 
     if not args.builder_dir.exists():
@@ -262,6 +335,8 @@ def main() -> None:
         save_samples_dir=args.save_samples_dir,
         sample_every_n_episodes=int(args.sample_every_n_episodes),
         near_zero_eps=float(args.near_zero_eps),
+        write_tasks_json=args.write_tasks_json,
+        write_episodes_csv=args.write_episodes_csv,
     )
 
 
