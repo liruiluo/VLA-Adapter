@@ -50,7 +50,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --moe_target_modules "all-linear" \
   --moe_top_k 2 \
   --lora_rank 64 \
-  --lora_dropout 0.05 \
   --use_fz False \
   --num_steps_before_decay 150000 \
   --max_steps 5000 \

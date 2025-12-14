@@ -26,7 +26,7 @@ PY_BIN="${ROOT_DIR}/env/bin/python"
 
 # === MoE-LoRA LIBERO-Object eval ===
 
-CKPT_DIR="${CKPT_DIR:-${ROOT_DIR}/outputs/configs+libero_object_no_noops+b16+lr-0.0002+moe-lora-e3-r64+dropout-0.05--image_aug--VLA-Adapter-MoELoRA--object-4GPU--2025-12-13_10-01-16--5000_chkpt}"
+CKPT_DIR="${CKPT_DIR:-${ROOT_DIR}/outputs/configs+libero_object_no_noops+b16+lr-0.0002+moe-lora-e3-r64+dropout-0.0--image_aug--VLA-Adapter-MoELoRA--object-4GPU--2025-12-14_10-19-42--5000_chkpt}"
 CONFIG_DIR="pretrained_models/configs"
 
 if [ ! -d "${CKPT_DIR}" ]; then
@@ -45,7 +45,6 @@ CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-0}" "${PY_BIN}" experiments/robot/l
   --moe_top_k 2 \
   --moe_target_modules "all-linear" \
   --lora_rank 64 \
-  --lora_dropout 0.05 \
   --use_l1_regression True \
   --use_minivlm True \
   --use_film False \

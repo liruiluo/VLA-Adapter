@@ -34,13 +34,12 @@ CUDA_VISIBLE_DEVICES=0 "${PY_BIN}" experiments/robot/libero/run_libero_eval.py \
   --moe_top_k 2 \
   --moe_target_modules "all-linear" \
   --lora_rank 64 \
-  --lora_dropout 0.05 \
   --use_l1_regression True \
   --use_minivlm True \
   --use_film False \
   --num_images_in_input 2 \
   --use_proprio True \
   --task_suite_name libero_object \
-  --num_trials_per_task 5 \
+  --num_trials_per_task 50 \
   --use_pro_version True \
   "$@"

@@ -112,7 +112,7 @@ class GenerateConfig:
     moe_target_modules: str = "all-linear"           # Substrings or 'all-linear' (must match training)
     moe_top_k: int = 0                               # If >0 and < num_experts, use Top-K gating
     lora_rank: int = 8                               # LoRA rank per expert (must match training)
-    lora_dropout: float = 0.05                       # LoRA dropout used during training (irrelevant at eval)
+    lora_dropout: float = 0.00                       # LoRA dropout used during training (irrelevant at eval)
 
     #################################################################################################################
     # LIBERO environment-specific parameters
