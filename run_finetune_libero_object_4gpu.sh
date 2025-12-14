@@ -51,8 +51,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --save_freq 5000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training True \
-  --batch_size 8 \
-  --grad_accumulation_steps 2 \
+  --batch_size 4 \
+  --grad_accumulation_steps 4 \
   --learning_rate 2e-4 \
   --lora_rank 64 \
   --use_pro_version True \

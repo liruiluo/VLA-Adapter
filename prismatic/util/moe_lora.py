@@ -52,16 +52,19 @@ class MoELoRALinear(nn.Module):
         self.scaling = float(lora_alpha) / float(r) if r > 0 else 1.0
         self.dropout = nn.Dropout(lora_dropout) if lora_dropout > 0.0 else nn.Identity()
 
-        self.top_k = None
-        if top_k is not None and top_k > 0 and top_k < self.num_experts:
-            self.top_k = int(top_k)
+        if self.r <= 0:
+            raise ValueError(f"MoE-LoRA requires `r > 0`, got r={self.r}")
+        if self.num_experts <= 0:
+            raise ValueError(f"MoE-LoRA requires `num_experts > 0`, got num_experts={self.num_experts}")
 
-        if self.r <= 0 or self.num_experts <= 0:
-            # Degenerate case: behave like a frozen Linear
-            for p in self.base.parameters():
-                p.requires_grad = False
-            self.register_buffer("_disabled", torch.tensor(1, dtype=torch.uint8))
-            return
+        self.top_k = None
+        if top_k is not None:
+            if top_k == 0:
+                self.top_k = None
+            elif not (0 < top_k < self.num_experts):
+                raise ValueError(f"MoE-LoRA requires `0 < top_k < num_experts`, got top_k={top_k}")
+            else:
+                self.top_k = int(top_k)
 
         # Expert-specific low-rank matrices
         # A: [E, R, in_features], B: [E, out_features, R]
@@ -154,7 +157,7 @@ def apply_moe_lora(
     top_k: int | None = None,
     target_modules: Iterable[str] = ("all-linear",),
     prefix: str = "",
-) -> None:
+) -> int:
     """
     Recursively wrap selected Linear submodules of `module` with `MoELoRALinear`.
 
@@ -168,7 +171,11 @@ def apply_moe_lora(
             Linear layers are wrapped; otherwise only those whose qualified
             names contain any of the substrings will be wrapped.
         prefix: Internal use; qualified name prefix during recursion.
+
+    Returns:
+        The number of `nn.Linear` layers wrapped with `MoELoRALinear`.
     """
+    replaced = 0
     for name, child in list(module.named_children()):
         qual_name = f"{prefix}.{name}" if prefix else name
 
@@ -182,8 +189,9 @@ def apply_moe_lora(
                 top_k=top_k,
             )
             setattr(module, name, wrapped)
+            replaced += 1
         else:
-            apply_moe_lora(
+            replaced += apply_moe_lora(
                 child,
                 num_experts=num_experts,
                 r=r,
@@ -193,3 +201,13 @@ def apply_moe_lora(
                 target_modules=target_modules,
                 prefix=qual_name,
             )
+
+    if prefix == "":
+        print(f"[MoE-LoRA] Wrapped {replaced} Linear layers with `MoELoRALinear`.")
+        if replaced == 0:
+            raise ValueError(
+                "apply_moe_lora did not wrap any `nn.Linear` layers. "
+                "Check `target_modules` (and ensure the model actually contains `nn.Linear` layers)."
+            )
+
+    return replaced
