@@ -46,7 +46,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --image_aug True \
   --use_lora False \
   --use_moe_lora True \
-  --moe_num_experts 10 \
+  --moe_num_experts 3 \
   --moe_target_modules "all-linear" \
   --moe_top_k 2 \
   --lora_rank 64 \

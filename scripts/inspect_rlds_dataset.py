@@ -229,8 +229,8 @@ def inspect_dataset(
             f"min={lens.min()} mean={lens.mean():.1f} median={np.median(lens):.1f} max={lens.max()}"
         )
 
-    print("\nTop language instructions (by episode):")
-    for text, c in instruction_counter.most_common(20):
+    print("\nAll language instructions (by episode, sorted):")
+    for text, c in instruction_counter.most_common():
         print(f"  {c:5d}  {text}")
 
     if write_tasks_json is not None:
@@ -305,7 +305,7 @@ def main() -> None:
         help="Path to TFDS builder directory (contains dataset_info.json, features.json, and *.tfrecord shards).",
     )
     parser.add_argument("--split", type=str, default="train")
-    parser.add_argument("--max_episodes", type=int, default=50)
+    parser.add_argument("--max_episodes", type=int, default=5000)
     parser.add_argument("--max_steps_per_episode", type=int, default=None)
     parser.add_argument("--save_samples_dir", type=Path, default=None)
     parser.add_argument("--sample_every_n_episodes", type=int, default=25)
