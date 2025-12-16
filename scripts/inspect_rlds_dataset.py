@@ -28,7 +28,7 @@ import tensorflow_datasets as tfds
 from PIL import Image
 
 
-def _maybe_decode_bytes(x: Any) -> str:
+def maybe_decode_bytes(x: Any) -> str:
     if isinstance(x, (bytes, bytearray)):
         return x.decode("utf-8", errors="replace")
     if isinstance(x, np.bytes_):
@@ -36,7 +36,7 @@ def _maybe_decode_bytes(x: Any) -> str:
     return str(x)
 
 
-def _safe_int_from_cardinality(card: tf.Tensor) -> Optional[int]:
+def safe_int_from_cardinality(card: tf.Tensor) -> Optional[int]:
     try:
         v = int(card.numpy())
     except Exception:
@@ -47,14 +47,14 @@ def _safe_int_from_cardinality(card: tf.Tensor) -> Optional[int]:
     return v
 
 
-def _percentiles(x: np.ndarray, ps: Tuple[float, ...]) -> Dict[str, float]:
+def percentiles(x: np.ndarray, ps: Tuple[float, ...]) -> Dict[str, float]:
     if x.size == 0:
         return {f"p{int(p)}": float("nan") for p in ps}
     q = np.percentile(x, ps)
     return {f"p{int(p)}": float(v) for p, v in zip(ps, q)}
 
 
-def _find_dataset_statistics_json(builder_dir: Path) -> Optional[Path]:
+def find_dataset_statistics_json(builder_dir: Path) -> Optional[Path]:
     candidates = sorted(builder_dir.glob("dataset_statistics_*.json"))
     if not candidates:
         return None
@@ -63,7 +63,7 @@ def _find_dataset_statistics_json(builder_dir: Path) -> Optional[Path]:
     return candidates[0]
 
 
-def _print_feature_schema(features: tfds.features.FeaturesDict) -> None:
+def print_feature_schema(features: tfds.features.FeaturesDict) -> None:
     print("Features (schema):")
     print(features)
     try:
@@ -85,7 +85,7 @@ def _print_feature_schema(features: tfds.features.FeaturesDict) -> None:
             print("Observation keys:", list(obs.keys()))
 
 
-def _save_image(arr: np.ndarray, path: Path) -> None:
+def save_image(arr: np.ndarray, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(arr).save(path)
 
@@ -110,9 +110,9 @@ def inspect_dataset(
     print(f"TFDS name: {builder.info.name}")
     print(f"Version: {builder.info.version}")
     print(f"Splits: {builder.info.splits}")
-    _print_feature_schema(builder.info.features)
+    print_feature_schema(builder.info.features)
 
-    stats_path = _find_dataset_statistics_json(builder_dir)
+    stats_path = find_dataset_statistics_json(builder_dir)
     if stats_path is not None:
         print(f"\nFound dataset statistics: {stats_path.name}")
         try:
@@ -154,7 +154,7 @@ def inspect_dataset(
         episode_file_path = None
         if "episode_metadata" in episode and isinstance(episode["episode_metadata"], dict):
             if "file_path" in episode["episode_metadata"]:
-                episode_file_path = _maybe_decode_bytes(episode["episode_metadata"]["file_path"])
+                episode_file_path = maybe_decode_bytes(episode["episode_metadata"]["file_path"])
 
         episode_instruction = None
         instruction_mismatch = False
@@ -167,7 +167,7 @@ def inspect_dataset(
             total_steps += 1
 
             if "language_instruction" in step:
-                this_instruction = _maybe_decode_bytes(step["language_instruction"]).strip()
+                this_instruction = maybe_decode_bytes(step["language_instruction"]).strip()
                 if st_idx == 0:
                     episode_instruction = this_instruction
                     instruction_counter[this_instruction] += 1
@@ -198,9 +198,9 @@ def inspect_dataset(
             ):
                 # Save episode-idx step-0 images
                 if "image" in obs:
-                    _save_image(obs["image"], save_samples_dir / f"ep{ep_idx:04d}_step0_image.png")
+                    save_image(obs["image"], save_samples_dir / f"ep{ep_idx:04d}_step0_image.png")
                 if "wrist_image" in obs:
-                    _save_image(obs["wrist_image"], save_samples_dir / f"ep{ep_idx:04d}_step0_wrist.png")
+                    save_image(obs["wrist_image"], save_samples_dir / f"ep{ep_idx:04d}_step0_wrist.png")
 
         episode_lengths.append(ep_len)
         if instruction_mismatch:
@@ -267,7 +267,7 @@ def inspect_dataset(
         print("\nAction stats (raw, over scanned steps):")
         for d in range(actions.shape[1]):
             vals = actions[:, d]
-            ps = _percentiles(vals, (1, 50, 99))
+            ps = percentiles(vals, (1, 50, 99))
             print(
                 f"  dim{d}: mean={vals.mean(): .4f} std={vals.std(): .4f} "
                 f"min={vals.min(): .4f} {ps['p1']=:.4f} {ps['p50']=:.4f} {ps['p99']=:.4f} max={vals.max(): .4f}"
@@ -286,7 +286,7 @@ def inspect_dataset(
         print("\nProprio/state stats (observation.state, raw):")
         for d in range(proprio.shape[1]):
             vals = proprio[:, d]
-            ps = _percentiles(vals, (1, 50, 99))
+            ps = percentiles(vals, (1, 50, 99))
             print(
                 f"  dim{d}: mean={vals.mean(): .4f} std={vals.std(): .4f} "
                 f"min={vals.min(): .4f} {ps['p1']=:.4f} {ps['p50']=:.4f} {ps['p99']=:.4f} max={vals.max(): .4f}"

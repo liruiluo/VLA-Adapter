@@ -76,6 +76,7 @@ class FinetuneConfig:
     dataset_name: str = "aloha_scoop_x_into_bowl"    # Name of fine-tuning dataset (e.g., `aloha_scoop_x_into_bowl`)
     run_root_dir: Path = Path("runs")                # Path to directory to store logs & checkpoints
     shuffle_buffer_size: int = 100_000               # Dataloader shuffle buffer size (can reduce if OOM errors occur)
+    max_trajectories_per_task: int = 0              # If >0, keep up to N trajectories per unique language_instruction
 
     # Algorithm and architecture
     use_l1_regression: bool = True                   # If True, trains continuous action head with L1 regression objective
@@ -335,15 +336,18 @@ def run_forward_pass(
 
     # Get ground-truth action labels
     ground_truth_actions = batch["actions"].to(device_id).to(torch.bfloat16)
+    if not torch.isfinite(ground_truth_actions).all():
+        raise RuntimeError("Non-finite values found in ground_truth_actions.")
     noise, noisy_actions, diffusion_timestep_embeddings = None, None, None
 
     # VLA forward pass
+    labels = batch["labels"].to(device_id)
     with torch.autocast("cuda", dtype=torch.bfloat16):
         output: CausalLMOutputWithPast = vla(
             input_ids=batch["input_ids"].to(device_id),
             attention_mask=batch["attention_mask"].to(device_id),
             pixel_values=batch["pixel_values"].to(torch.bfloat16).to(device_id),
-            labels=batch["labels"],
+            labels=labels,
             output_hidden_states=True,
             proprio=batch["proprio"] if use_proprio else None,
             proprio_projector=proprio_projector if use_proprio else None,
@@ -354,7 +358,7 @@ def run_forward_pass(
             )
 
     # Get action masks needed for logging
-    ground_truth_token_ids = batch["labels"][:,1:].to(device_id)
+    ground_truth_token_ids = labels[:, 1:]
     current_action_mask = get_current_action_mask(ground_truth_token_ids)
     next_actions_mask = get_next_actions_mask(ground_truth_token_ids)
 
@@ -421,7 +425,12 @@ def run_forward_pass(
             phase=cfg.phase,
             )
 
+        if not torch.isfinite(predicted_actions).all():
+            raise RuntimeError("Non-finite values found in predicted_actions.")
+
         loss = torch.nn.L1Loss()(predicted_actions, ground_truth_actions)
+        if not torch.isfinite(loss).all():
+            raise RuntimeError("Non-finite loss_value (NaN/Inf) from L1Loss(predicted_actions, ground_truth_actions).")
 
         metrics.update(
             {
@@ -439,6 +448,8 @@ def run_forward_pass(
             curr_action_l1_loss = torch.nn.L1Loss()(ground_truth_curr_action, predicted_curr_action)
             next_actions_l1_loss = torch.nn.L1Loss()(ground_truth_next_actions, predicted_next_actions)
             if compute_diffusion_l1:
+                if not torch.isfinite(curr_action_l1_loss).all():
+                    raise RuntimeError("Non-finite curr_action_l1_loss (NaN/Inf).")
                 print('curr: ',curr_action_l1_loss.item())
                 # print('next: ',next_actions_l1_loss.item())
 
@@ -1005,6 +1016,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         resize_resolution=tuple(vla.module.config.image_sizes),
         shuffle_buffer_size=cfg.shuffle_buffer_size,
         image_aug=cfg.image_aug,
+        max_trajectories_per_task=cfg.max_trajectories_per_task,
     )
     if cfg.use_val_set:
         val_dataset = RLDSDataset(
