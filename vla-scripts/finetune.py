@@ -1044,7 +1044,11 @@ def finetune(cfg: FinetuneConfig) -> None:
         collate_fn=collator,
         num_workers=0,  # Important: Set to 0 if using RLDS, which uses its own parallelism
     )
-    print('Len of dataloader: ', len(dataloader))
+    # RLDS training dataset uses an infinite `.repeat()` stream; calling `len(dataloader)` triggers noisy warnings
+    # inside PyTorch's DataLoader once more than the reported epoch length is fetched.
+    epoch_examples = len(train_dataset)
+    approx_epoch_batches = (epoch_examples + cfg.batch_size - 1) // cfg.batch_size
+    print(f"Approx epoch size: {epoch_examples} examples (~{approx_epoch_batches} batches @ batch_size={cfg.batch_size}).")
     if cfg.use_val_set:
         val_batch_size = cfg.batch_size
         val_dataloader = DataLoader(

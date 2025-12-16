@@ -212,6 +212,7 @@ def printSelectedTrajectoriesForDebug(
     split: str,
     trajIndices: np.ndarray,
     numParallelReads: Any,
+    debugKey: Optional[str] = None,
 ) -> None:
     keep = set(int(x) for x in trajIndices.tolist())
     dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=False, num_parallel_reads=numParallelReads)
@@ -238,8 +239,21 @@ def printSelectedTrajectoriesForDebug(
             break
 
     selectedSorted = sorted(selected, key=lambda x: (x["language_instruction"], x["traj_index"]))
-    print("[rlds-debug] selected_trajectories:", flush=True)
-    print(json.dumps(selectedSorted, ensure_ascii=False), flush=True)
+    # Write full details to a pretty-printed JSON file to avoid flooding logs.
+    filename = "selected_trajectories_debug.json" if not debugKey else f"selected_trajectories_debug__{debugKey}.json"
+    out_path = tf.io.gfile.join(builder.data_dir, filename)
+    with tf.io.gfile.GFile(out_path, "w") as f:
+        json.dump(selectedSorted, f, ensure_ascii=False, indent=2)
+
+    print(f"[rlds-debug] wrote selected trajectories to: {out_path}", flush=True)
+    for item in selectedSorted:
+        print(
+            f"[rlds-debug] traj_index={item['traj_index']} steps={item['num_steps']} instruction={item['language_instruction']!r}",
+            flush=True,
+        )
+    if os.environ.get("RLDS_DEBUG_PRINT_SELECTED_JSON", "0") == "1":
+        print("[rlds-debug] selected_trajectories_full_json:", flush=True)
+        print(json.dumps(selectedSorted, ensure_ascii=False, indent=2), flush=True)
 
 
 # ruff: noqa: B006
@@ -437,6 +451,7 @@ def make_dataset_from_rlds(
                 split=selectedSplit,
                 trajIndices=keep_traj_indices,
                 numParallelReads=num_parallel_reads,
+                debugKey=debugKey,
             )
 
     # load or compute dataset statistics
