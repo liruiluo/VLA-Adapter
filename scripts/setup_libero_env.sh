@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 本脚本假设「提交 / 执行脚本」时当前工作目录就是 VLA-Adapter 根目录。
-# 在 Slurm 下，脚本会被拷贝到 spool 目录，但 CWD 会保持为提交时的目录，
-# 所以这里直接用 $PWD 更稳，不再依赖 BASH_SOURCE。
-ROOT_DIR="${PWD}"
+# Resolve repo root (works locally, from anywhere, and under Slurm)
+if [ -n "${SLURM_SUBMIT_DIR-}" ] && [ -d "${SLURM_SUBMIT_DIR}" ]; then
+  ROOT_DIR="${SLURM_SUBMIT_DIR}"
+elif command -v git >/dev/null 2>&1 && git -C "${PWD}" rev-parse --show-toplevel >/dev/null 2>&1; then
+  ROOT_DIR="$(git -C "${PWD}" rev-parse --show-toplevel)"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
 echo "[INFO] Repo root: ${ROOT_DIR}"
 
 # 1) 尝试激活本项目自带的 conda 环境 ./env
-#    注意：只有在 *source* 这个脚本时（例如：`source setup_libero_env.sh`），
-#    conda activate 对当前 shell 才是有效的；直接 `bash setup_libero_env.sh`
+#    注意：只有在 *source* 这个脚本时（例如：`source scripts/setup_libero_env.sh`），
+#    conda activate 对当前 shell 才是有效的；直接 `bash scripts/setup_libero_env.sh`
 #    只会在子进程里生效。
 if command -v conda >/dev/null 2>&1; then
   # 优先按绝对路径激活，失败就尝试相对路径；若都失败则给出提示但不中断。

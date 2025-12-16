@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 在 Slurm 作业中，脚本会被复制到 spool 目录执行，但当前工作目录
-# 会保持为提交作业时所在的目录，所以这里直接使用 $PWD 作为仓库根目录。
-ROOT_DIR="${PWD}"
+# Resolve repo root (works locally, from anywhere, and under Slurm)
+if [ -n "${SLURM_SUBMIT_DIR-}" ] && [ -d "${SLURM_SUBMIT_DIR}" ]; then
+  ROOT_DIR="${SLURM_SUBMIT_DIR}"
+elif command -v git >/dev/null 2>&1 && git -C "${PWD}" rev-parse --show-toplevel >/dev/null 2>&1; then
+  ROOT_DIR="$(git -C "${PWD}" rev-parse --show-toplevel)"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
 if [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
   . "${HOME}/miniconda3/etc/profile.d/conda.sh"
 fi
 
-source "${ROOT_DIR}/setup_libero_env.sh"
+source "${ROOT_DIR}/scripts/setup_libero_env.sh"
 
 export MUJOCO_GL=osmesa
 unset PYOPENGL_PLATFORM

@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve repo root (works locally, from anywhere, and under Slurm)
+if [ -n "${SLURM_SUBMIT_DIR-}" ] && [ -d "${SLURM_SUBMIT_DIR}" ]; then
+  ROOT_DIR="${SLURM_SUBMIT_DIR}"
+elif command -v git >/dev/null 2>&1 && git -C "${PWD}" rev-parse --show-toplevel >/dev/null 2>&1; then
+  ROOT_DIR="$(git -C "${PWD}" rev-parse --show-toplevel)"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
 # Optional: load user conda base, then project env via setup_libero_env.sh
@@ -9,7 +17,7 @@ if [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
   . "${HOME}/miniconda3/etc/profile.d/conda.sh"
 fi
 
-source "${ROOT_DIR}/setup_libero_env.sh"
+source "${ROOT_DIR}/scripts/setup_libero_env.sh"
 
 export MUJOCO_GL=osmesa
 unset PYOPENGL_PLATFORM

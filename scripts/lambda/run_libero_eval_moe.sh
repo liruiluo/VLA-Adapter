@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# In Slurm, the script may be copied to a spool dir, but CWD stays where you submitted the job.
-ROOT_DIR="${PWD}"
+# Resolve repo root (works locally, from anywhere, and under Slurm)
+if [ -n "${SLURM_SUBMIT_DIR-}" ] && [ -d "${SLURM_SUBMIT_DIR}" ]; then
+  ROOT_DIR="${SLURM_SUBMIT_DIR}"
+elif command -v git >/dev/null 2>&1 && git -C "${PWD}" rev-parse --show-toplevel >/dev/null 2>&1; then
+  ROOT_DIR="$(git -C "${PWD}" rev-parse --show-toplevel)"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
 mkdir -p eval_logs hf_cache timm_cache
@@ -16,7 +23,7 @@ if [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
   . "${HOME}/miniconda3/etc/profile.d/conda.sh"
 fi
 
-source "${ROOT_DIR}/setup_libero_env.sh"
+source "${ROOT_DIR}/scripts/setup_libero_env.sh"
 
 export MUJOCO_GL=osmesa
 unset PYOPENGL_PLATFORM

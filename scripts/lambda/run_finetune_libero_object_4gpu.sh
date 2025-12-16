@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Resolve repo root (works both locally and under Slurm)
-if [ -n "${SLURM_SUBMIT_DIR-}" ]; then
+# Resolve repo root (works locally, from anywhere, and under Slurm)
+if [ -n "${SLURM_SUBMIT_DIR-}" ] && [ -d "${SLURM_SUBMIT_DIR}" ]; then
   ROOT_DIR="${SLURM_SUBMIT_DIR}"
+elif command -v git >/dev/null 2>&1 && git -C "${PWD}" rev-parse --show-toplevel >/dev/null 2>&1; then
+  ROOT_DIR="$(git -C "${PWD}" rev-parse --show-toplevel)"
 else
-  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 fi
 cd "${ROOT_DIR}"
 
@@ -64,4 +67,3 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
 
 echo "[INFO] Finished 4-GPU finetune job for ${data_name}."
 echo "[INFO] Log file: logs/VLA-Adapter--object-4GPU--${current_time}.log"
-
