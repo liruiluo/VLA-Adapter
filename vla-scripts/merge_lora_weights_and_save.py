@@ -7,13 +7,20 @@ Usage:
     python vla-scripts/merge_lora_weights_and_save.py \
         --base_checkpoint openvla/openvla-7b \
         --lora_finetuned_checkpoint_dir /PATH/TO/CHECKPOINT/DIR/
+
+For the "MiniVLM" (Prismatic-VLM -> OpenVLA HF wrapper) workflow used by this repo's local pretrained models, run:
+    python vla-scripts/merge_lora_weights_and_save.py \
+        --use_minivlm True \
+        --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
+        --config_file_path pretrained_models/configs \
+        --lora_finetuned_checkpoint_dir /PATH/TO/CHECKPOINT/DIR/
 """
 
 import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import draccus
 import torch
@@ -31,10 +38,19 @@ from prismatic.models import load, load_vla
 class ConvertConfig:
     # fmt: off
 
-    base_checkpoint: Union[str, Path] = ""                   # Base model checkpoint path/dir (either openvla/openvla-7b or whichever model you fine-tuned / resumed training from)
-    lora_finetuned_checkpoint_dir: Union[str, Path] = ""     # Checkpoint directory containing the LoRA adapter
-    vlm_path: Union[str, Path] = "" 
-    use_minivla: bool = False                        # 
+    base_checkpoint: Union[str, Path] = ""                   # Base model checkpoint path/dir (HF repo id or local dir)
+    lora_finetuned_checkpoint_dir: Union[str, Path] = ""     # Checkpoint directory containing the LoRA adapter (`lora_adapter/`)
+
+    # MiniVLM (Prismatic-VLM) -> OpenVLA HF wrapper reconstruction (local, no download if cached/offline)
+    config_file_path: Union[str, Path] = "pretrained_models/configs"
+    vlm_path: Union[str, Path] = ""
+    use_minivlm: bool = False
+    # Backward-compat typo (older scripts used `use_minivla`)
+    use_minivla: bool = False
+
+    # Output
+    output_dir: Optional[Union[str, Path]] = None            # Where to save merged HF checkpoint (default: lora_finetuned_checkpoint_dir)
+    device: str = "cpu"                                      # 'cpu' or 'cuda'
 
 
     # fmt: on
@@ -48,17 +64,33 @@ def main(cfg: ConvertConfig) -> None:
     AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
     AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
 
-    if cfg.use_minivla:
-        hf_token = ''
-        vlm = load_vla(
-            cfg.vlm_path,
-            hf_token=hf_token,
-            load_for_training=True,
-            )
-        config = AutoConfig.from_pretrained("../pretrained_models/configs/config.json")
+    use_minivlm = bool(getattr(cfg, "use_minivlm", False) or getattr(cfg, "use_minivla", False))
+
+    def _rename_state_dict_keys(state_dict, replace_map):
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            new_key = key
+            for old, new in replace_map:
+                if old in new_key:
+                    new_key = new_key.replace(old, new)
+            new_state_dict[new_key] = value
+        return new_state_dict
+
+    if use_minivlm:
+        vlm_path = str(cfg.vlm_path)
+        if not vlm_path:
+            raise ValueError("`--vlm_path` is required when `--use_minivlm True`.")
+
+        hf_token = ""
+        # Mirror `vla-scripts/finetune.py` logic: Prismatic-VLM uses `load`, OpenVLA uses `load_vla`.
+        if "prism-qwen25-extra-dinosiglip-224px-0_5b" in vlm_path:
+            vlm = load(vlm_path, hf_token=hf_token, load_for_training=True)
+        else:
+            vlm = load_vla(vlm_path, hf_token=hf_token, load_for_training=True)
+
+        config = AutoConfig.from_pretrained(str(cfg.config_file_path), trust_remote_code=False)
         vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16)
-        # for name, param in model.named_parameters():
-        #     print(f"{name}: {param.shape}")
+
         replace_map = [
             ("vision_backbone.dino_featurizer", "vision_backbone.featurizer"),
             ("vision_backbone.siglip_featurizer", "vision_backbone.fused_featurizer"),
@@ -69,20 +101,13 @@ def main(cfg: ConvertConfig) -> None:
             ("gamma", "scale_factor"),
         ]
 
-        def rename_state_dict_keys(state_dict, replace_map):
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                new_k = k
-                for old, new in replace_map:
-                    if old in new_k:
-                        new_k = new_k.replace(old, new)
-                new_state_dict[new_k] = v
-            return new_state_dict
-        
-        old_state_dict = vlm.state_dict()
-        RAW_STATE_DICT = rename_state_dict_keys(old_state_dict, replace_map)
-    
-        missing_keys, unexpected_keys = vla.load_state_dict(RAW_STATE_DICT, strict=False)
+        raw_state_dict = _rename_state_dict_keys(vlm.state_dict(), replace_map)
+        missing_keys, unexpected_keys = vla.load_state_dict(raw_state_dict, strict=False)
+        if missing_keys:
+            print(f"[merge] Missing keys while loading base VLM weights: {len(missing_keys)}")
+        if unexpected_keys:
+            print(f"[merge] Unexpected keys while loading base VLM weights: {len(unexpected_keys)}")
+
     else:
         # Load Model using HF AutoClasses
         print(f"Loading base model: {cfg.base_checkpoint}")
@@ -93,16 +118,19 @@ def main(cfg: ConvertConfig) -> None:
             trust_remote_code=True,
         )
 
+    device = torch.device(cfg.device)
+    vla = vla.to(device)
+
     # Load LoRA weights and merge into base model, then save final checkpoint
     print("Merging LoRA weights into base model...")
     start_time = time.time()
-    merged_vla = PeftModel.from_pretrained(vla, os.path.join(cfg.lora_finetuned_checkpoint_dir, "lora_adapter")).to(
-        "cuda"
-    )
+    adapter_dir = os.path.join(str(cfg.lora_finetuned_checkpoint_dir), "lora_adapter")
+    merged_vla = PeftModel.from_pretrained(vla, adapter_dir).to(device)
     merged_vla = merged_vla.merge_and_unload()
-    merged_vla.save_pretrained(cfg.lora_finetuned_checkpoint_dir)
+    out_dir = str(cfg.output_dir) if cfg.output_dir is not None else str(cfg.lora_finetuned_checkpoint_dir)
+    merged_vla.save_pretrained(out_dir, safe_serialization=True)
     print(f"\nMerging complete! Time elapsed (sec): {time.time() - start_time}")
-    print(f"\nSaved merged model checkpoint at:\n{cfg.lora_finetuned_checkpoint_dir}")
+    print(f"\nSaved merged model checkpoint at:\n{out_dir}")
 
 
 if __name__ == "__main__":
