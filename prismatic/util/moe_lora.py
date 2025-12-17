@@ -1,213 +1,197 @@
 """
 moe_lora.py
 
-Minimal Mixture-of-Experts (MoE) LoRA implementation for wrapping Linear layers.
+MoE-LoRA implementation built on top of PEFT's LoRA injection.
 
-This module is intentionally lightweight and self-contained so that it can be
-used alongside the existing PEFT-based LoRA path without changing external
-dependencies.
+Design goal:
+- Keep PEFT as the injection mechanism (for broad model support).
+- Replace each injected LoRA Linear with a token-level MoE router and per-expert (A,B) LoRA factors.
+
+This mirrors the style in the MoELoRA_Riemannian reference implementation, but is kept minimal:
+- No merging/unmerging support for MoE-LoRA.
+- No mixed-batch adapter routing support.
 """
 
 from __future__ import annotations
 
-import math
-from typing import Iterable, Tuple
+import copy
+from dataclasses import dataclass
+from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import peft
+from peft import LoraConfig, get_peft_model
+from peft.tuners.lora.layer import Linear as PeftLoraLinear
 
-class MoELoRALinear(nn.Module):
+
+@dataclass(frozen=True)
+class MoELoRAConfig:
+    num_experts: int
+    top_k: int
+    expert_name_prefix: str = "expert"
+
+
+class MoELoRALinear(PeftLoraLinear):
     """
-    Wraps a frozen Linear layer with a small MoE-style LoRA adapter.
+    PEFT LoRA Linear with a token-level MoE router over experts.
 
-    - `base` is kept frozen.
-    - We instantiate `num_experts` low-rank adapters (A_e, B_e).
-    - A token-level router produces a softmax over experts.
-    - The final output is: base(x) + sum_e gate_e * (B_e @ A_e @ x).
+    After `set_moe()`:
+    - We create E experts: adapter names `expert_{i}`.
+    - Each expert has its own LoRA A/B modules.
+    - A router produces gate probabilities per token and we compute:
+        y = base(x) + sum_e gate_e(x) * LoRA_e(x)
     """
 
-    def __init__(
-        self,
-        base_linear: nn.Linear,
-        num_experts: int = 4,
-        r: int = 8,
-        lora_alpha: float = 16.0,
-        lora_dropout: float = 0.0,
-        top_k: int | None = None,
-    ) -> None:
-        super().__init__()
-        if not isinstance(base_linear, nn.Linear):
-            raise TypeError(f"MoELoRALinear expects nn.Linear, got {type(base_linear)}")
+    moe: Optional[MoELoRAConfig] = None
 
-        self.base = base_linear
-        self.in_features = base_linear.in_features
-        self.out_features = base_linear.out_features
-        self._base_dtype = base_linear.weight.dtype
-        self._base_device = base_linear.weight.device
+    def set_moe(self, num_experts: int, top_k: int) -> None:
+        if self.merged:
+            raise NotImplementedError("MoE-LoRA layers should not be merged; unmerge before converting.")
+        if self.disable_adapters:
+            raise RuntimeError("Cannot configure MoE-LoRA while adapters are disabled.")
 
-        self.num_experts = int(num_experts)
-        self.r = int(r)
-        self.scaling = float(lora_alpha) / float(r) if r > 0 else 1.0
-        self.dropout = nn.Dropout(lora_dropout) if lora_dropout > 0.0 else nn.Identity()
+        num_experts = int(num_experts)
+        if num_experts <= 0:
+            raise ValueError(f"MoE-LoRA requires `num_experts > 0`, got {num_experts}")
 
-        if self.r <= 0:
-            raise ValueError(f"MoE-LoRA requires `r > 0`, got r={self.r}")
-        if self.num_experts <= 0:
-            raise ValueError(f"MoE-LoRA requires `num_experts > 0`, got num_experts={self.num_experts}")
+        top_k = int(top_k)
+        if not (0 < top_k < num_experts):
+            raise ValueError(f"MoE-LoRA requires `0 < top_k < num_experts`, got top_k={top_k} num_experts={num_experts}")
 
-        self.top_k = None
-        if top_k is not None:
-            if top_k == 0:
-                self.top_k = None
-            elif not (0 < top_k < self.num_experts):
-                raise ValueError(f"MoE-LoRA requires `0 < top_k < num_experts`, got top_k={top_k}")
-            else:
-                self.top_k = int(top_k)
+        if "default" not in self.lora_A or "default" not in self.lora_B:
+            raise RuntimeError("Expected a PEFT-initialized LoRA layer with adapter_name='default'.")
 
-        # Expert-specific low-rank matrices
-        # A: [E, R, in_features], B: [E, out_features, R]
-        self.A = nn.Parameter(
-            torch.empty(self.num_experts, self.r, self.in_features, device=self._base_device, dtype=self._base_dtype)
-        )
-        self.B = nn.Parameter(
-            torch.empty(self.num_experts, self.out_features, self.r, device=self._base_device, dtype=self._base_dtype)
-        )
+        if getattr(self, "use_dora", {}).get("default", False):
+            raise NotImplementedError("MoE-LoRA does not currently support DoRA adapters in this repo.")
 
-        # Simple router over experts: x -> logits[E]
-        self.router = nn.Linear(self.in_features, self.num_experts, bias=False)
+        # Duplicate the default LoRA modules into per-expert adapter names.
+        base_A: nn.Linear = self.lora_A["default"]
+        base_B: nn.Linear = self.lora_B["default"]
+        base_dropout: nn.Module = self.lora_dropout["default"]
+        base_scaling = self.scaling["default"]
 
-        self.reset_parameters()
+        expert_names = [f"expert_{i}" for i in range(num_experts)]
+        lora_A = nn.ModuleDict({name: copy.deepcopy(base_A) for name in expert_names})
+        lora_B = nn.ModuleDict({name: copy.deepcopy(base_B) for name in expert_names})
+        lora_dropout = nn.ModuleDict({name: copy.deepcopy(base_dropout) for name in expert_names})
 
-        # Freeze base weights – only train A/B + router
-        for p in self.base.parameters():
-            p.requires_grad = False
+        # Replace PEFT internal adapter maps.
+        self.lora_A = lora_A
+        self.lora_B = lora_B
+        self.lora_dropout = lora_dropout
+        self.scaling = {name: base_scaling for name in expert_names}
+        self.use_dora = {name: False for name in expert_names}
+        self.set_adapter(expert_names)
 
-        self.register_buffer("_disabled", torch.tensor(0, dtype=torch.uint8))
-        # Ensure dtype/device always matches the wrapped base Linear
-        self.to(device=self._base_device, dtype=self._base_dtype)
+        # Token-level router: x -> logits over experts
+        in_features = base_A.weight.shape[1]
+        dtype = base_A.weight.dtype
+        device = base_A.weight.device
+        self.gate = nn.Linear(in_features, num_experts, bias=False, dtype=dtype, device=device)
+        nn.init.zeros_(self.gate.weight)
 
-    def reset_parameters(self) -> None:
-        # LoRA-style init: A ~ small random, B ~= 0, router ~= 0
-        # Flatten A for initialization
-        fan_in = self.in_features
-        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0.0
-        nn.init.uniform_(self.A, -bound, bound)
-        nn.init.zeros_(self.B)
-        nn.init.zeros_(self.router.weight)
+        # LoRA-style initialization per expert (A: kaiming, B: zeros)
+        for name in expert_names:
+            nn.init.kaiming_uniform_(self.lora_A[name].weight, a=5**0.5)
+            nn.init.zeros_(self.lora_B[name].weight)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Fallback: if disabled, just call base
-        if self._disabled.item() == 1:
-            return self.base(x)
+        self.moe = MoELoRAConfig(num_experts=num_experts, top_k=top_k)
 
-        base_out = self.base(x)
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        if self.moe is None:
+            return super().forward(x, *args, **kwargs)
 
-        # Support inputs of shape [..., in_features]
-        orig_shape = x.shape
-        x_flat = x.view(-1, self.in_features)  # [N, D]
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
+        if adapter_names is not None:
+            raise NotImplementedError("MoE-LoRA does not support PEFT mixed-batch forwarding in this repo.")
+        if self.merged:
+            raise NotImplementedError("MoE-LoRA layers should not be merged; some errors may happen.")
 
-        # Router: [N, D] -> [N, E], optionally with top-k sparsification
-        logits = self.router(x_flat)  # [N, E]
-        if self.top_k is not None:
-            topk_vals, topk_idx = torch.topk(logits, self.top_k, dim=-1)
-            masked = logits.new_full(logits.shape, float("-inf"))
-            masked.scatter_(1, topk_idx, topk_vals)
-            gate = F.softmax(masked, dim=-1)
-        else:
-            gate = F.softmax(logits, dim=-1)  # [N, E]
+        if self.disable_adapters:
+            return self.base_layer(x, *args, **kwargs)
 
-        x_drop = self.dropout(x_flat)  # [N, D]
+        result = self.base_layer(x, *args, **kwargs)
+        torch_result_dtype = result.dtype
 
-        # A: [E, R, D], B: [E, O, R]
-        # LoRA A:  x_drop [N,D] * A [E,R,D] -> [N,E,R]
-        # (einsum: n d, e r d -> n e r)
-        lora_A = torch.einsum("nd,erd->ner", x_drop, self.A)
-        # LoRA B:  lora_A [N,E,R] * B [E,O,R] -> [N,E,O]
-        # (einsum: n e r, e o r -> n e o)
-        lora_B = torch.einsum("ner,eor->neo", lora_A, self.B)
-        lora_B = lora_B * self.scaling  # [N,E,O]
+        # Compute per-token gate probabilities.
+        #
+        # IMPORTANT: We do "top-k then softmax" (masked softmax on logits), not "softmax then top-k".
+        gate_logits = self.gate(x.to(self.gate.weight.dtype)).to(torch_result_dtype)  # [..., E]
+        if self.moe is None:
+            raise RuntimeError("MoE-LoRA misconfigured: missing `self.moe`.")
+        if not (0 < self.moe.top_k < self.moe.num_experts):
+            raise RuntimeError(
+                f"MoE-LoRA requires `0 < top_k < num_experts`, got top_k={self.moe.top_k} num_experts={self.moe.num_experts}"
+            )
+        topk_vals, topk_idx = torch.topk(gate_logits, self.moe.top_k, dim=-1)
+        masked = gate_logits.new_full(gate_logits.shape, float("-inf"))
+        masked.scatter_(-1, topk_idx, topk_vals)
+        gate_probs = F.softmax(masked, dim=-1)
 
-        # Combine experts with gate: gate [N,E], lora_B [N,E,O] -> [N,O]
-        moe_delta = torch.einsum("ne,neo->no", gate, lora_B)
+        # Run experts (dense loop; acceptable for small num_experts)
+        # NOTE: assume x is at least 2D (batch x seq x dim) for gate indexing
+        for expert_id, expert_name in enumerate(self.active_adapters):
+            if expert_name not in self.lora_A:
+                continue
+            lora_A = self.lora_A[expert_name]
+            lora_B = self.lora_B[expert_name]
+            dropout = self.lora_dropout[expert_name]
+            scaling = self.scaling[expert_name]
 
-        moe_delta = moe_delta.view(*orig_shape[:-1], self.out_features)
-        return base_out + moe_delta
+            x_cast = x.to(lora_A.weight.dtype)
+            delta = lora_B(lora_A(dropout(x_cast))) * scaling  # [..., out]
+            weight = gate_probs[..., expert_id].unsqueeze(-1)  # [..., 1]
+            result = result + weight * delta.to(torch_result_dtype)
 
-
-def _should_wrap(name: str, target_modules: Iterable[str]) -> bool:
-    """
-    Decide whether to wrap a given module name with MoE-LoRA.
-
-    If "all-linear" is present in target_modules, every Linear layer is wrapped.
-    Otherwise, we wrap only if any target substring appears in the module name.
-    """
-    if "all-linear" in target_modules:
-        return True
-    return any(t in name for t in target_modules)
+        return result.to(torch_result_dtype)
 
 
 def apply_moe_lora(
-    module: nn.Module,
+    model: nn.Module,
+    *,
     num_experts: int,
     r: int,
     lora_alpha: float,
     lora_dropout: float,
-    top_k: int | None = None,
-    target_modules: Iterable[str] = ("all-linear",),
-    prefix: str = "",
-) -> int:
+    top_k: int,
+    target_modules: Union[str, Sequence[str]] = "all-linear",
+) -> nn.Module:
     """
-    Recursively wrap selected Linear submodules of `module` with `MoELoRALinear`.
+    Apply PEFT LoRA to `model` and convert injected LoRA Linear layers into MoE-LoRA layers.
 
-    Args:
-        module: Root module to modify in-place.
-        num_experts: Number of experts in the MoE adapter.
-        r: LoRA rank per expert.
-        lora_alpha: LoRA scaling factor (alpha / r).
-        lora_dropout: LoRA dropout probability.
-        target_modules: Iterable of substrings; if contains "all-linear", all
-            Linear layers are wrapped; otherwise only those whose qualified
-            names contain any of the substrings will be wrapped.
-        prefix: Internal use; qualified name prefix during recursion.
-
-    Returns:
-        The number of `nn.Linear` layers wrapped with `MoELoRALinear`.
+    Returns a PEFT-wrapped model (PeftModel) with MoE-LoRA layers.
     """
-    replaced = 0
-    for name, child in list(module.named_children()):
-        qual_name = f"{prefix}.{name}" if prefix else name
+    normalized_target_modules: Union[str, Sequence[str]] = target_modules
+    if not isinstance(target_modules, str):
+        # Be forgiving: many call sites pass ["all-linear"] or include it among substrings.
+        if "all-linear" in target_modules:
+            normalized_target_modules = "all-linear"
 
-        if isinstance(child, nn.Linear) and _should_wrap(qual_name, target_modules):
-            wrapped = MoELoRALinear(
-                child,
-                num_experts=num_experts,
-                r=r,
-                lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                top_k=top_k,
-            )
-            setattr(module, name, wrapped)
-            replaced += 1
-        else:
-            replaced += apply_moe_lora(
-                child,
-                num_experts=num_experts,
-                r=r,
-                lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                top_k=top_k,
-                target_modules=target_modules,
-                prefix=qual_name,
-            )
+    lora_config = LoraConfig(
+        r=int(r),
+        lora_alpha=int(lora_alpha),
+        lora_dropout=float(lora_dropout),
+        target_modules=normalized_target_modules,
+        bias="none",
+    )
+    peft_model = get_peft_model(model, lora_config)
 
-    if prefix == "":
-        print(f"[MoE-LoRA] Wrapped {replaced} Linear layers with `MoELoRALinear`.")
-        if replaced == 0:
-            raise ValueError(
-                "apply_moe_lora did not wrap any `nn.Linear` layers. "
-                "Check `target_modules` (and ensure the model actually contains `nn.Linear` layers)."
-            )
+    converted = 0
+    for _, module in peft_model.named_modules():
+        if isinstance(module, peft.tuners.lora.LoraLayer) and isinstance(module, PeftLoraLinear):
+            module.__class__ = MoELoRALinear
+            module.set_moe(num_experts=num_experts, top_k=top_k)
+            converted += 1
 
-    return replaced
+    print(f"[MoE-LoRA/PEFT] Converted {converted} LoRA Linear layers to `MoELoRALinear`.")
+    if converted == 0:
+        raise ValueError(
+            "apply_moe_lora did not convert any PEFT LoRA Linear layers. "
+            "Check `target_modules` and ensure LoRA injection succeeded."
+        )
+
+    return peft_model

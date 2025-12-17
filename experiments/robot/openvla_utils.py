@@ -308,12 +308,16 @@ def get_vla(cfg: Any) -> torch.nn.Module:
         target_modules = (
             [m.strip() for m in getattr(cfg, "moe_target_modules", "all-linear").split(",") if m.strip()]
         )
-        top_k = getattr(cfg, "moe_top_k", 0)
-        top_k = top_k if (top_k is not None and top_k > 0) else None
+        num_experts = int(getattr(cfg, "moe_num_experts", 0))
+        top_k = int(getattr(cfg, "moe_top_k", 0))
+        if top_k <= 0 or top_k >= num_experts:
+            raise ValueError(
+                f"MoE-LoRA requires `0 < moe_top_k < moe_num_experts`, got moe_top_k={top_k} moe_num_experts={num_experts}"
+            )
 
-        apply_moe_lora(
+        vla = apply_moe_lora(
             vla,
-            num_experts=getattr(cfg, "moe_num_experts", 0),
+            num_experts=num_experts,
             r=getattr(cfg, "lora_rank", 8),
             lora_alpha=2 * getattr(cfg, "lora_rank", 8),
             lora_dropout=getattr(cfg, "lora_dropout", 0.0),

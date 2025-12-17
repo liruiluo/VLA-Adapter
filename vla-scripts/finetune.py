@@ -864,8 +864,12 @@ def finetune(cfg: FinetuneConfig) -> None:
             if cfg.moe_target_modules
             else ["all-linear"]
         )
-        top_k = cfg.moe_top_k if cfg.moe_top_k > 0 else None
-        apply_moe_lora(
+        if cfg.moe_top_k <= 0 or cfg.moe_top_k >= cfg.moe_num_experts:
+            raise ValueError(
+                f"MoE-LoRA requires `0 < moe_top_k < moe_num_experts`, got moe_top_k={cfg.moe_top_k} moe_num_experts={cfg.moe_num_experts}"
+            )
+        top_k = cfg.moe_top_k
+        vla = apply_moe_lora(
             vla,
             num_experts=cfg.moe_num_experts,
             r=cfg.lora_rank,
