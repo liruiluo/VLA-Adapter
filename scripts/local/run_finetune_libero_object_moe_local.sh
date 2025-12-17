@@ -56,15 +56,15 @@ CUDA_VISIBLE_DEVICES=0 \
   --moe_num_experts 3 \
   --moe_target_modules "all-linear" \
   --moe_top_k 2 \
-  --lora_rank 8 \
+  --lora_rank 64 \
   --use_fz False \
   --num_steps_before_decay 200000 \
-  --max_steps 50 \
-  --save_freq 50 \
+  --max_steps 5005 \
+  --save_freq 5000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training False \
   --batch_size 2 \
-  --grad_accumulation_steps 16 \
+  --grad_accumulation_steps 32 \
   --learning_rate 2e-4 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \
