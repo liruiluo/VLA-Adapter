@@ -35,18 +35,16 @@ fi
 data_name=libero_object_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
-echo "[INFO] Starting 4-GPU MoE-LoRA finetune for ${data_name} (1 trajectory per task)..."
+echo "[INFO] Starting 4-GPU MoE-LoRA finetune for ${data_name}..."
 
-# 4-GPU (>=80GB total) MoE-LoRA training on LIBERO-Object
-# This ablation keeps up to 1 trajectory per unique language_instruction (task).
+# 4-GPU (>=80GB total) MoE-LoRA training on LIBERO-Object (offline subset: 1 traj / task).
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 "${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 4 vla-scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
   --config_file_path pretrained_models/configs \
-  --data_root_dir data/libero \
+  --data_root_dir data/libero_subsets \
   --dataset_name "${data_name}" \
   --run_root_dir outputs \
-  --max_trajectories_per_task 1 \
   --use_film False \
   --num_images_in_input 2 \
   --use_proprio True \
@@ -70,9 +68,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \
   --wandb_project "${data_name}" \
-  --run_id_note "VLA-Adapter-MoELoRA--object-4GPU--1traj-per-task--${current_time}" \
+  --run_id_note "VLA-Adapter-MoELoRA--object-4GPU--${data_name}--${current_time}" \
   "$@" \
-  > "logs/VLA-Adapter-MoELoRA--object-4GPU--1traj-per-task--${current_time}.log" 2>&1
+  > "logs/VLA-Adapter-MoELoRA--object-4GPU--${data_name}--${current_time}.log" 2>&1
 
-echo "[INFO] Finished 4-GPU MoE-LoRA finetune job for ${data_name} (1 trajectory per task)."
-echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--object-4GPU--1traj-per-task--${current_time}.log"
+echo "[INFO] Finished 4-GPU MoE-LoRA finetune job for ${data_name}."
+echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--object-4GPU--${data_name}--${current_time}.log"

@@ -76,7 +76,6 @@ class FinetuneConfig:
     dataset_name: str = "aloha_scoop_x_into_bowl"    # Name of fine-tuning dataset (e.g., `aloha_scoop_x_into_bowl`)
     run_root_dir: Path = Path("runs")                # Path to directory to store logs & checkpoints
     shuffle_buffer_size: int = 100_000               # Dataloader shuffle buffer size (can reduce if OOM errors occur)
-    max_trajectories_per_task: int = 0              # If >0, keep up to N trajectories per unique language_instruction
 
     # Algorithm and architecture
     use_l1_regression: bool = True                   # If True, trains continuous action head with L1 regression objective
@@ -1020,7 +1019,6 @@ def finetune(cfg: FinetuneConfig) -> None:
         resize_resolution=tuple(vla.module.config.image_sizes),
         shuffle_buffer_size=cfg.shuffle_buffer_size,
         image_aug=cfg.image_aug,
-        max_trajectories_per_task=cfg.max_trajectories_per_task,
     )
     if cfg.use_val_set:
         val_dataset = RLDSDataset(

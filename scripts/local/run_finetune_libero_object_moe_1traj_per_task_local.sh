@@ -38,18 +38,14 @@ fi
 data_name=libero_object_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
-# Keep up to 1 trajectory per unique language_instruction
-MAX_TRAJ_PER_TASK=1
-
 # Single-GPU local MoE-LoRA finetune (smoke test); increase max_steps/batch_size after sanity check.
 CUDA_VISIBLE_DEVICES=0 \
 "${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
   --config_file_path pretrained_models/configs \
-  --data_root_dir data/libero \
+  --data_root_dir data/libero_subsets \
   --dataset_name "${data_name}" \
   --run_root_dir outputs \
-  --max_trajectories_per_task "${MAX_TRAJ_PER_TASK}" \
   --use_film False \
   --num_images_in_input 2 \
   --use_proprio True \
@@ -73,9 +69,9 @@ CUDA_VISIBLE_DEVICES=0 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \
   --wandb_project "${data_name}" \
-  --run_id_note "VLA-Adapter-MoELoRA--libero_object_no_noops--1traj-per-task--${current_time}" \
+  --run_id_note "VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}" \
   "$@" \
-  > "logs/VLA-Adapter-MoELoRA--libero_object_no_noops--1traj-per-task--${current_time}.log" 2>&1 &
+  > "logs/VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}.log" 2>&1 &
 
-echo "[INFO] Launched local MoE-LoRA finetune for ${data_name} (max_trajectories_per_task=${MAX_TRAJ_PER_TASK})."
-echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--libero_object_no_noops--1traj-per-task--${current_time}.log"
+echo "[INFO] Launched local MoE-LoRA finetune for ${data_name}."
+echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}.log"

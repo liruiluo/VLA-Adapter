@@ -35,226 +35,6 @@ overwatch = initialize_overwatch(__name__)
 # Configure Tensorflow with *no GPU devices* (to prevent clobber with PyTorch)
 tf.config.set_visible_devices([], "GPU")
 
-debugTrajSubsetPrintedKeys: set[str] = set()
-
-
-def decode_tf_string(x) -> str:
-    if isinstance(x, (bytes, bytearray)):
-        return x.decode("utf-8")
-    if isinstance(x, np.bytes_):
-        return x.tobytes().decode("utf-8")
-    raise TypeError(f"Expected bytes-like tf.string value, got {type(x)}")
-
-
-def select_traj_indices_by_language_instruction(
-    builder: tfds.core.DatasetBuilder,
-    *,
-    split: str,
-    max_trajectories_per_task: int,
-    num_parallel_reads: int,
-) -> np.ndarray:
-    """
-    Deterministically select up to N trajectories per unique language instruction.
-
-    Notes:
-    - Selection is done on the raw RLDS builder output (before standardization/restructuring), so we rely on
-      dlimp-injected `_traj_index` and the per-step `language_instruction` field being present.
-    - Order is deterministic because we iterate with `shuffle=False`.
-    """
-    if max_trajectories_per_task <= 0:
-        return np.array([], dtype=np.int64)
-
-    ds = dl.DLataset.from_rlds(builder, split=split, shuffle=False, num_parallel_reads=num_parallel_reads)
-    keep: list[int] = []
-    counts: dict[str, int] = {}
-
-    for traj in ds.as_numpy_iterator():
-        if "language_instruction" not in traj:
-            raise ValueError("RLDS trajectory missing required key: `language_instruction`")
-        if "_traj_index" not in traj:
-            raise ValueError("RLDS trajectory missing required key: `_traj_index`")
-
-        lang = traj["language_instruction"]
-        if len(lang) == 0:
-            raise ValueError("Trajectory has empty `language_instruction`.")
-        instruction = decode_tf_string(lang[0]).strip()
-        if instruction == "":
-            raise ValueError("Trajectory has empty `language_instruction` string.")
-        if not np.all(lang == lang[0]):
-            raise ValueError("Trajectory has inconsistent `language_instruction` across steps.")
-
-        traj_index = traj["_traj_index"]
-        if len(traj_index) == 0:
-            raise ValueError("Trajectory has empty `_traj_index`.")
-        idx = int(traj_index[0])
-
-        seen = counts.get(instruction, 0)
-        if seen >= max_trajectories_per_task:
-            continue
-        counts[instruction] = seen + 1
-        keep.append(idx)
-
-    return np.asarray(sorted(set(keep)), dtype=np.int64)
-
-
-def load_or_compute_traj_indices_by_language_instruction(
-    builder: tfds.core.DatasetBuilder,
-    *,
-    split: str,
-    max_trajectories_per_task: int,
-    num_parallel_reads: int,
-) -> np.ndarray:
-    cache_basename = f"traj_subset_by_lang__split={split}__max_per_task={max_trajectories_per_task}.json"
-    cache_path = tf.io.gfile.join(builder.data_dir, cache_basename)
-    if tf.io.gfile.exists(cache_path):
-        with tf.io.gfile.GFile(cache_path, "r") as f:
-            payload = json.load(f)
-        indices = np.asarray(payload["traj_indices"], dtype=np.int64)
-        assert indices.ndim == 1
-        return indices
-
-    indices = select_traj_indices_by_language_instruction(
-        builder,
-        split=split,
-        max_trajectories_per_task=max_trajectories_per_task,
-        num_parallel_reads=num_parallel_reads,
-    )
-    with tf.io.gfile.GFile(cache_path, "w") as f:
-        json.dump({"traj_indices": indices.tolist()}, f, indent=2)
-    return indices
-
-
-def summarizeArrayStats(array: np.ndarray) -> Dict[str, Any]:
-    if array.dtype.kind not in {"b", "i", "u", "f"}:
-        raise TypeError(f"Expected numeric array for stats, got dtype={array.dtype} shape={array.shape}")
-    return {
-        "shape": list(array.shape),
-        "dtype": str(array.dtype),
-        "min": float(array.min()) if array.size else None,
-        "max": float(array.max()) if array.size else None,
-        "mean": float(array.mean()) if array.size else None,
-    }
-
-
-def decodeImageValueToUint8Array(imageValue: Any, *, channels: int = 3) -> np.ndarray:
-    array = np.asarray(imageValue)
-    if array.dtype == np.uint8 and array.ndim == 3 and array.shape[-1] == channels:
-        return array
-
-    if array.shape == () and array.dtype.kind in {"S", "O"}:
-        imageBytes = array.item()
-        if isinstance(imageBytes, np.bytes_):
-            imageBytes = imageBytes.tobytes()
-        if not isinstance(imageBytes, (bytes, bytearray)):
-            raise TypeError(f"Expected bytes-like image payload, got {type(imageBytes)}")
-
-        decoded = tf.io.decode_image(
-            tf.constant(imageBytes),
-            channels=channels,
-            expand_animations=False,
-        )
-        decoded = tf.cast(decoded, tf.uint8)
-        decodedArray = decoded.numpy()
-        if decodedArray.ndim != 3 or decodedArray.shape[-1] != channels:
-            raise ValueError(f"Decoded image has unexpected shape: {decodedArray.shape}")
-        return decodedArray
-
-    raise TypeError(f"Unsupported image value type for debug decode: dtype={array.dtype} shape={array.shape}")
-
-
-def summarizeImageForDebug(imageValue: Any, *, channels: int = 3) -> Dict[str, Any]:
-    array = np.asarray(imageValue)
-    if array.dtype == np.uint8 and array.ndim == 3:
-        return {"decoded": True, "bytes_len": None, "stats": summarizeArrayStats(array)}
-
-    if array.shape == () and array.dtype.kind in {"S", "O"}:
-        raw = array.item()
-        if isinstance(raw, np.bytes_):
-            raw = raw.tobytes()
-        if not isinstance(raw, (bytes, bytearray)):
-            raise TypeError(f"Expected bytes-like image payload, got {type(raw)}")
-        decodedArray = decodeImageValueToUint8Array(raw, channels=channels)
-        return {"decoded": True, "bytes_len": int(len(raw)), "stats": summarizeArrayStats(decodedArray)}
-
-    raise TypeError(f"Unsupported image value type for debug summary: dtype={array.dtype} shape={array.shape}")
-
-
-def summarizeTrajectoryStep(traj: Dict[str, Any], stepIndex: int) -> Dict[str, Any]:
-    obs = traj["observation"]
-    summary: Dict[str, Any] = {
-        "reward": float(np.asarray(traj["reward"][stepIndex]).astype(np.float32)),
-        "discount": float(np.asarray(traj["discount"][stepIndex]).astype(np.float32)),
-        "is_first": bool(traj["is_first"][stepIndex]),
-        "is_last": bool(traj["is_last"][stepIndex]),
-        "is_terminal": bool(traj["is_terminal"][stepIndex]),
-        "action": np.asarray(traj["action"][stepIndex]).astype(np.float32).tolist(),
-        "observation_keys": sorted(list(obs.keys())),
-    }
-
-    if "state" in obs:
-        summary["observation.state"] = np.asarray(obs["state"][stepIndex]).astype(np.float32).tolist()
-    if "joint_state" in obs:
-        summary["observation.joint_state"] = np.asarray(obs["joint_state"][stepIndex]).astype(np.float32).tolist()
-    if "proprio" in obs:
-        summary["observation.proprio"] = np.asarray(obs["proprio"][stepIndex]).astype(np.float32).tolist()
-
-    if "image" in obs:
-        summary["observation.image"] = summarizeImageForDebug(obs["image"][stepIndex], channels=3)
-    if "wrist_image" in obs:
-        summary["observation.wrist_image"] = summarizeImageForDebug(obs["wrist_image"][stepIndex], channels=3)
-
-    return summary
-
-
-def printSelectedTrajectoriesForDebug(
-    builder: tfds.core.DatasetBuilder,
-    *,
-    split: str,
-    trajIndices: np.ndarray,
-    numParallelReads: Any,
-    debugKey: Optional[str] = None,
-) -> None:
-    keep = set(int(x) for x in trajIndices.tolist())
-    dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=False, num_parallel_reads=numParallelReads)
-
-    selected: list[dict] = []
-    for traj in dataset.as_numpy_iterator():
-        trajIndex = int(np.asarray(traj["_traj_index"][0]).astype(np.int64))
-        if trajIndex not in keep:
-            continue
-
-        lang = traj["language_instruction"]
-        instruction = decode_tf_string(lang[0]).strip().lower()
-        selected.append(
-            {
-                "traj_index": trajIndex,
-                "language_instruction": instruction,
-                "num_steps": int(len(traj["action"])),
-                "first_step": summarizeTrajectoryStep(traj, 0),
-                "last_step": summarizeTrajectoryStep(traj, -1),
-            }
-        )
-
-        if len(selected) == len(keep):
-            break
-
-    selectedSorted = sorted(selected, key=lambda x: (x["language_instruction"], x["traj_index"]))
-    # Write full details to a pretty-printed JSON file to avoid flooding logs.
-    filename = "selected_trajectories_debug.json" if not debugKey else f"selected_trajectories_debug__{debugKey}.json"
-    out_path = tf.io.gfile.join(builder.data_dir, filename)
-    with tf.io.gfile.GFile(out_path, "w") as f:
-        json.dump(selectedSorted, f, ensure_ascii=False, indent=2)
-
-    print(f"[rlds-debug] wrote selected trajectories to: {out_path}", flush=True)
-    for item in selectedSorted:
-        print(
-            f"[rlds-debug] traj_index={item['traj_index']} steps={item['num_steps']} instruction={item['language_instruction']!r}",
-            flush=True,
-        )
-    if os.environ.get("RLDS_DEBUG_PRINT_SELECTED_JSON", "0") == "1":
-        print("[rlds-debug] selected_trajectories_full_json:", flush=True)
-        print(json.dumps(selectedSorted, ensure_ascii=False, indent=2), flush=True)
-
 
 # ruff: noqa: B006
 def make_dataset_from_rlds(
@@ -270,7 +50,6 @@ def make_dataset_from_rlds(
     language_key: Optional[str] = None,
     action_proprio_normalization_type: ACTION_PROPRIO_NORMALIZATION_TYPE,
     dataset_statistics: Optional[Union[dict, str]] = None,
-    max_trajectories_per_task: Optional[int] = None,
     absolute_action_mask: Optional[List[bool]] = None,
     action_normalization_mask: Optional[List[bool]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
@@ -423,37 +202,6 @@ def make_dataset_from_rlds(
 
     builder = tfds.builder(name, data_dir=data_dir)
 
-    # Optional: filter trajectories so we keep only up to N trajectories per unique language instruction.
-    # This is typically used for "1 trajectory per task" ablations.
-    keep_traj_indices = None
-    if train and max_trajectories_per_task is not None and int(max_trajectories_per_task) > 0:
-        selectedSplit = "train"
-        keep_traj_indices = load_or_compute_traj_indices_by_language_instruction(
-            builder,
-            split=selectedSplit,
-            max_trajectories_per_task=int(max_trajectories_per_task),
-            num_parallel_reads=num_parallel_reads,
-        )
-        keep_traj_indices_tf = tf.constant(keep_traj_indices, dtype=tf.int64)
-
-        def keep_traj(x):
-            # `_traj_index` is a per-frame vector; use the first element as a trajectory identifier.
-            return tf.reduce_any(tf.equal(x["_traj_index"][0], keep_traj_indices_tf))
-
-        rank = int(os.environ.get("RANK", "0"))
-        debugKey = f"{name}__split={selectedSplit}__max_per_task={int(max_trajectories_per_task)}"
-        shouldPrint = int(max_trajectories_per_task) == 1 and rank == 0 and debugKey not in debugTrajSubsetPrintedKeys
-        if shouldPrint:
-            debugTrajSubsetPrintedKeys.add(debugKey)
-            print(f"[rlds-debug] {debugKey} selected_traj_count={int(keep_traj_indices.shape[0])}", flush=True)
-            printSelectedTrajectoriesForDebug(
-                builder,
-                split=selectedSplit,
-                trajIndices=keep_traj_indices,
-                numParallelReads=num_parallel_reads,
-                debugKey=debugKey,
-            )
-
     # load or compute dataset statistics
     if isinstance(dataset_statistics, str):
         with tf.io.gfile.GFile(dataset_statistics, "r") as f:
@@ -462,8 +210,6 @@ def make_dataset_from_rlds(
         full_dataset = dl.DLataset.from_rlds(
             builder, split="all", shuffle=False, num_parallel_reads=num_parallel_reads
         )
-        if keep_traj_indices is not None:
-            full_dataset = full_dataset.filter(keep_traj)
         full_dataset = full_dataset.traj_map(restructure, num_parallel_calls)
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
@@ -472,7 +218,6 @@ def make_dataset_from_rlds(
                 str(builder.info),
                 str(state_obs_keys),
                 inspect.getsource(standardize_fn) if standardize_fn is not None else "",
-                f"max_trajectories_per_task={int(max_trajectories_per_task) if max_trajectories_per_task else 0}",
             ),
             save_dir=builder.data_dir,
         )
@@ -491,8 +236,6 @@ def make_dataset_from_rlds(
     split = "train" if train else "val"
 
     dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads)
-    if keep_traj_indices is not None:
-        dataset = dataset.filter(keep_traj)
 
     dataset = dataset.traj_map(restructure, num_parallel_calls)
     dataset = dataset.traj_map(
