@@ -53,12 +53,12 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --use_minivlm True \
   --image_aug True \
   --num_steps_before_decay 5000 \
-  --max_steps 5000 \
+  --max_steps 5005 \
   --save_freq 5000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training True \
-  --batch_size 4 \
-  --grad_accumulation_steps 4 \
+  --batch_size 16 \
+  --grad_accumulation_steps 1 \
   --learning_rate 2e-4 \
   --lora_rank 64 \
   --use_pro_version True \
