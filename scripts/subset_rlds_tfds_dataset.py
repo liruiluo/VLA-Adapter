@@ -51,6 +51,7 @@ def subset_dataset(
     split: str,
     max_traj_per_task: int,
     num_tasks: int,
+    disable_shuffling: bool,
     overwrite: bool,
 ) -> Path:
     if not src_version_dir.exists():
@@ -82,7 +83,7 @@ def subset_dataset(
         serializer=example_serializer.ExampleSerializer(serialized_info),
         filename_template=filename_template,
         hash_salt=split,
-        disable_shuffling=True,
+        disable_shuffling=bool(disable_shuffling),
         file_format=src_builder.info.file_format,
     )
 
@@ -140,7 +141,12 @@ def subset_dataset(
         builder=identity,
         features=features,
         split_dict=split_dict,
-        disable_shuffling=True,
+        # IMPORTANT:
+        # - If this is True, TFDS treats the dataset as "ordered" and enforces ordering guards (e.g., forbids
+        #   interleave_cycle_length != 1 when reading with shuffling disabled).
+        # - For training, we generally don't need a globally-ordered dataset, so default is False to avoid
+        #   TFDS errors when parallel-reading.
+        disable_shuffling=bool(disable_shuffling),
         description=description,
         homepage=homepage,
         citation=citation,
@@ -169,6 +175,11 @@ def main() -> None:
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--max_traj_per_task", type=int, default=1)
     parser.add_argument("--num_tasks", type=int, default=10)
+    parser.add_argument(
+        "--disable_shuffling",
+        action="store_true",
+        help="Mark the destination TFDS dataset as ordered (disableShuffling=true). Default is false.",
+    )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -180,6 +191,7 @@ def main() -> None:
         split=args.split,
         max_traj_per_task=int(args.max_traj_per_task),
         num_tasks=int(args.num_tasks),
+        disable_shuffling=bool(args.disable_shuffling),
         overwrite=bool(args.overwrite),
     )
     print(f"[subset] done: {out}")
