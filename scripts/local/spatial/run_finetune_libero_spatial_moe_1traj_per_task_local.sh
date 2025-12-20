@@ -58,9 +58,9 @@ CUDA_VISIBLE_DEVICES=0 \
   --moe_top_k 2 \
   --lora_rank 8 \
   --use_fz False \
-  --num_steps_before_decay 200000 \
-  --max_steps 50 \
-  --save_freq 50 \
+  --num_steps_before_decay 10000 \
+  --max_steps 10005 \
+  --save_freq 10000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training False \
   --batch_size 4 \
@@ -75,4 +75,3 @@ CUDA_VISIBLE_DEVICES=0 \
 
 echo "[INFO] Launched local MoE-LoRA finetune for ${data_name}."
 echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--libero_spatial_no_noops--${current_time}.log"
-

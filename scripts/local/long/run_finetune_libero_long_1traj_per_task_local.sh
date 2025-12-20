@@ -35,7 +35,7 @@ if [ ! -x "${TORCHRUN_BIN}" ]; then
   TORCHRUN_BIN="torchrun"
 fi
 
-data_name=libero_object_no_noops
+data_name=libero_10_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
 CUDA_VISIBLE_DEVICES=0 \
@@ -53,9 +53,9 @@ CUDA_VISIBLE_DEVICES=0 \
   --use_fz False \
   --use_minivlm True \
   --image_aug True \
-  --num_steps_before_decay 200000 \
-  --max_steps 5005 \
-  --save_freq 5000 \
+  --num_steps_before_decay 30000 \
+  --max_steps 30005 \
+  --save_freq 30000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training True \
   --batch_size 4 \
@@ -65,8 +65,8 @@ CUDA_VISIBLE_DEVICES=0 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \
   --wandb_project "${data_name}" \
-  --run_id_note "VLA-Adapter--libero_object_no_noops--${current_time}" \
-  > "logs/VLA-Adapter--libero_object_no_noops--${current_time}.log" 2>&1 &
+  --run_id_note "VLA-Adapter--libero_10_no_noops--${current_time}" \
+  > "logs/VLA-Adapter--libero_10_no_noops--${current_time}.log" 2>&1 &
 
 echo "[INFO] Launched local finetune for ${data_name}."
-echo "[INFO] Log file: logs/VLA-Adapter--libero_object_no_noops--${current_time}.log"
+echo "[INFO] Log file: logs/VLA-Adapter--libero_10_no_noops--${current_time}.log"

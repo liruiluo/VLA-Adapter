@@ -13,18 +13,21 @@ fi
 cd "${ROOT_DIR}"
 
 mkdir -p logs
+mkdir -p hf_cache timm_cache
 
 # Redirect HF / timm cache to project disk (avoid small $HOME quota)
 export HF_HOME="${ROOT_DIR}/hf_cache"
 export TIMM_CACHE_DIR="${ROOT_DIR}/timm_cache"
-mkdir -p "${HF_HOME}" "${TIMM_CACHE_DIR}"
 
-# Ensure training logs (including debug prints) stream to the log file immediately.
-export PYTHONUNBUFFERED=1
-
-# For consistency with eval env; harmless for pure training
+# Use EGL for consistency with eval (harmless for training)
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
+
+# Auto-activate local conda/venv at ./env if present
+if [ -f "${ROOT_DIR}/env/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/env/bin/activate"
+fi
 
 # Prefer the project-local torchrun if available
 TORCHRUN_BIN="${ROOT_DIR}/env/bin/torchrun"
@@ -35,9 +38,7 @@ fi
 data_name=libero_object_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
-echo "[INFO] Starting 1-GPU MoE-LoRA finetune for ${data_name}..."
-
-# 1-GPU MoE-LoRA training on LIBERO-Object (offline subset: 1 traj / task).
+# Single-GPU local MoE-LoRA finetune (smoke test); increase max_steps/batch_size after sanity check.
 CUDA_VISIBLE_DEVICES=0 \
 "${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
@@ -55,22 +56,22 @@ CUDA_VISIBLE_DEVICES=0 \
   --moe_num_experts 3 \
   --moe_target_modules "all-linear" \
   --moe_top_k 2 \
-  --lora_rank 64 \
+  --lora_rank 8 \
   --use_fz False \
-  --num_steps_before_decay 5000 \
-  --max_steps 5000 \
-  --save_freq 5000 \
+  --num_steps_before_decay 2500 \
+  --max_steps 2505 \
+  --save_freq 2500 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training False \
-  --batch_size 8 \
-  --grad_accumulation_steps 8 \
+  --batch_size 4 \
+  --grad_accumulation_steps 16 \
   --learning_rate 2e-4 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \
   --wandb_project "${data_name}" \
-  --run_id_note "VLA-Adapter-MoELoRA--object-1GPU--${data_name}--${current_time}" \
+  --run_id_note "VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}" \
   "$@" \
-  > "logs/VLA-Adapter-MoELoRA--object-1GPU--${data_name}--${current_time}.log" 2>&1
+  > "logs/VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}.log" 2>&1 &
 
-echo "[INFO] Finished 1-GPU MoE-LoRA finetune job for ${data_name}."
-echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--object-1GPU--${data_name}--${current_time}.log"
+echo "[INFO] Launched local MoE-LoRA finetune for ${data_name}."
+echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}.log"

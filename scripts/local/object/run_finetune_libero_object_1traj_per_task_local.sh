@@ -23,7 +23,7 @@ export TIMM_CACHE_DIR="${ROOT_DIR}/timm_cache"
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
 
-# Auto-activate local conda/venv at ./env if present
+# Auto-activate local virtualenv if present
 if [ -f "${ROOT_DIR}/env/bin/activate" ]; then
   # shellcheck disable=SC1091
   source "${ROOT_DIR}/env/bin/activate"
@@ -38,7 +38,6 @@ fi
 data_name=libero_object_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
-# Single-GPU local MoE-LoRA finetune (smoke test); increase max_steps/batch_size after sanity check.
 CUDA_VISIBLE_DEVICES=0 \
 "${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
@@ -46,32 +45,28 @@ CUDA_VISIBLE_DEVICES=0 \
   --data_root_dir data/libero_subsets \
   --dataset_name "${data_name}" \
   --run_root_dir outputs \
+  --shuffle_buffer_size 100000 \
   --use_film False \
   --num_images_in_input 2 \
   --use_proprio True \
+  --use_lora True \
+  --use_fz False \
   --use_minivlm True \
   --image_aug True \
-  --use_lora False \
-  --use_moe_lora True \
-  --moe_num_experts 3 \
-  --moe_target_modules "all-linear" \
-  --moe_top_k 2 \
-  --lora_rank 8 \
-  --use_fz False \
-  --num_steps_before_decay 200000 \
-  --max_steps 50 \
-  --save_freq 50 \
+  --num_steps_before_decay 2500 \
+  --max_steps 2505 \
+  --save_freq 2500 \
   --save_latest_checkpoint_only False \
-  --merge_lora_during_training False \
+  --merge_lora_during_training True \
   --batch_size 4 \
   --grad_accumulation_steps 16 \
   --learning_rate 2e-4 \
+  --lora_rank 64 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \
   --wandb_project "${data_name}" \
-  --run_id_note "VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}" \
-  "$@" \
-  > "logs/VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}.log" 2>&1 &
+  --run_id_note "VLA-Adapter--libero_object_no_noops--${current_time}" \
+  > "logs/VLA-Adapter--libero_object_no_noops--${current_time}.log" 2>&1 &
 
-echo "[INFO] Launched local MoE-LoRA finetune for ${data_name}."
-echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--libero_object_no_noops--${current_time}.log"
+echo "[INFO] Launched local finetune for ${data_name}."
+echo "[INFO] Log file: logs/VLA-Adapter--libero_object_no_noops--${current_time}.log"

@@ -52,9 +52,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --use_fz False \
   --use_minivlm True \
   --image_aug True \
-  --num_steps_before_decay 5000 \
-  --max_steps 5005 \
-  --save_freq 5000 \
+  --num_steps_before_decay 10000 \
+  --max_steps 10005 \
+  --save_freq 10000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training True \
   --batch_size 16 \
@@ -70,4 +70,3 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
 
 echo "[INFO] Finished 4-GPU finetune job for ${data_name}."
 echo "[INFO] Log file: logs/VLA-Adapter--spatial-4GPU--${data_name}--${current_time}.log"
-

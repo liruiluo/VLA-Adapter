@@ -53,9 +53,9 @@ CUDA_VISIBLE_DEVICES=0 \
   --use_fz False \
   --use_minivlm True \
   --image_aug True \
-  --num_steps_before_decay 200000 \
-  --max_steps 5005 \
-  --save_freq 5000 \
+  --num_steps_before_decay 25000 \
+  --max_steps 25005 \
+  --save_freq 25000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training True \
   --batch_size 4 \
@@ -70,4 +70,3 @@ CUDA_VISIBLE_DEVICES=0 \
 
 echo "[INFO] Launched local finetune for ${data_name}."
 echo "[INFO] Log file: logs/VLA-Adapter--libero_goal_no_noops--${current_time}.log"
-

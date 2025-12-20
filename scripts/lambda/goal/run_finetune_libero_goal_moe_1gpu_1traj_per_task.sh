@@ -57,9 +57,9 @@ CUDA_VISIBLE_DEVICES=0 \
   --moe_top_k 2 \
   --lora_rank 64 \
   --use_fz False \
-  --num_steps_before_decay 5000 \
-  --max_steps 5000 \
-  --save_freq 5000 \
+  --num_steps_before_decay 25000 \
+  --max_steps 25005 \
+  --save_freq 25000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training False \
   --batch_size 8 \
@@ -74,4 +74,3 @@ CUDA_VISIBLE_DEVICES=0 \
 
 echo "[INFO] Finished 1-GPU MoE-LoRA finetune job for ${data_name}."
 echo "[INFO] Log file: logs/VLA-Adapter-MoELoRA--goal-1GPU--${data_name}--${current_time}.log"
-
