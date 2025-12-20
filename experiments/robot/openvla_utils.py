@@ -15,6 +15,7 @@ import requests
 import tensorflow as tf
 import torch
 from huggingface_hub import HfApi, hf_hub_download
+from peft import PeftModel
 from PIL import Image
 from transformers import AutoConfig, AutoImageProcessor, AutoModelForVision2Seq, AutoProcessor
 
@@ -443,6 +444,16 @@ def _load_dataset_stats(vla: torch.nn.Module, checkpoint_path: str) -> None:
         with open(dataset_statistics_path, "r") as f:
             norm_stats = json.load(f)
         vla.norm_stats = norm_stats
+        # IMPORTANT: For PEFT-wrapped models (LoRA/MoE-LoRA), `predict_action()` is resolved on the base model.
+        # Setting `vla.norm_stats` on the wrapper alone is insufficient.
+        if isinstance(vla, PeftModel):
+            base_model = vla.get_base_model()
+            if not hasattr(base_model, "norm_stats"):
+                raise AttributeError(
+                    f"Expected PEFT base model to have `norm_stats`, got type={type(base_model)}. "
+                    "This likely indicates a mismatched model wrapper/version."
+                )
+            base_model.norm_stats = norm_stats
     else:
         print(
             "WARNING: No local dataset_statistics.json file found for current checkpoint.\n"
