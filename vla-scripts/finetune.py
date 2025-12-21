@@ -347,7 +347,9 @@ def run_forward_pass(
             attention_mask=batch["attention_mask"].to(device_id),
             pixel_values=batch["pixel_values"].to(torch.bfloat16).to(device_id),
             labels=labels,
-            output_hidden_states=True,
+            output_hidden_states=use_l1_regression,
+            compute_loss=not use_l1_regression,
+            output_logits=not use_l1_regression,
             proprio=batch["proprio"] if use_proprio else None,
             proprio_projector=proprio_projector if use_proprio else None,
             noisy_actions=None,
@@ -364,7 +366,11 @@ def run_forward_pass(
     # Compute metrics for discrete action representation (next-token prediction)
     if not (use_l1_regression):
         loss = output.loss
+        if output.logits is None:
+            raise RuntimeError("Tokenized-action training requires model to return logits (output.logits is None).")
         predicted_token_ids = output.logits[:, num_patches:-1].argmax(dim=2)
+        # Free logits ASAP (loss already carries the needed autograd graph).
+        output.logits = None
 
         curr_action_accuracy = compute_token_accuracy(
             predicted_token_ids, 
@@ -922,6 +928,10 @@ def finetune(cfg: FinetuneConfig) -> None:
     # Wrap VLA with DDP
     vla = wrap_ddp(vla, device_id, find_unused=True)
 
+    # Optional components (only initialized for certain training objectives / inputs)
+    proprio_projector = None
+    action_head = None
+
     # If applicable, instantiate proprio projector
     if cfg.use_proprio:
         proprio_projector = init_module(
@@ -956,6 +966,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     # Instantiate optimizer
     trainable_params = [param for param in vla.parameters() if param.requires_grad]
     if cfg.use_l1_regression:
+        assert action_head is not None
         trainable_params += [param for param in action_head.parameters() if param.requires_grad]
 
     if cfg.use_proprio:

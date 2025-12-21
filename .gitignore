@@ -171,6 +171,7 @@ pretrained_models/**/checkpoints/
 pretrained_models/**/run-metrics.jsonl
 pretrained_models/**/prism-*.jsonl
 pretrained_models/configs/config.json.back.*
+pretrained_models/configs/*.py.back.*
 pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b/
 
 # Local build metadata
