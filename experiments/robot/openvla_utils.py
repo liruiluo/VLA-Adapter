@@ -872,8 +872,14 @@ def get_vla_action(
         
         # Generate action
         if action_head is None:
-            # Standard VLA output (single-image inputs, discrete actions)
-            action, _ = vla.predict_action(**inputs, unnorm_key=cfg.unnorm_key, do_sample=False)
+            # Standard VLA output (discrete action tokens). Still pass proprio if enabled.
+            action, _ = vla.predict_action(
+                **inputs,
+                unnorm_key=cfg.unnorm_key,
+                do_sample=False,
+                proprio=proprio,
+                proprio_projector=proprio_projector,
+            )
         else:
             # Custom action head for continuous actions
             action, _ = vla.predict_action(

@@ -29,7 +29,7 @@ export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 
 RUNNER=()
 if [ -z "${DISPLAY-}" ] && command -v xvfb-run >/dev/null 2>&1; then
-  RUNNER=(xvfb-run -s "-screen 0 1280x1024x24")
+  RUNNER=(xvfb-run -a -s "-screen 0 1280x1024x24")
 elif [ -z "${DISPLAY-}" ]; then
   echo "[WARN] DISPLAY is not set and xvfb-run is not available; MuJoCo rendering may fail." >&2
 fi

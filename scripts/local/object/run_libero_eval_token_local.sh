@@ -12,6 +12,12 @@ else
 fi
 cd "${ROOT_DIR}"
 
+mkdir -p eval_logs hf_cache timm_cache
+
+# Redirect HF / timm cache to project disk (avoid small $HOME quota)
+export HF_HOME="${ROOT_DIR}/hf_cache"
+export TIMM_CACHE_DIR="${ROOT_DIR}/timm_cache"
+
 # Optional: load user conda base, then project env via setup_libero_env.sh
 if [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
   . "${HOME}/miniconda3/etc/profile.d/conda.sh"
@@ -20,8 +26,6 @@ fi
 source "${ROOT_DIR}/scripts/setup_libero_env.sh"
 
 # === Stable headless rendering defaults ===
-# - Prefer GLFW under Xvfb (more stable than osmesa on many machines)
-# - Respect user override if MUJOCO_GL is already set.
 export MUJOCO_GL="${MUJOCO_GL:-glfw}"
 unset PYOPENGL_PLATFORM
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
@@ -34,7 +38,6 @@ elif [ -z "${DISPLAY-}" ]; then
   echo "[WARN] DISPLAY is not set and xvfb-run is not available; MuJoCo rendering may fail." >&2
 fi
 
-# Force use of project conda env python (has draccus, libero, etc.)
 PY_BIN="${ROOT_DIR}/env/bin/python"
 
 # Ensure robosuite does not force EGL on Linux (common source of headless crashes).
@@ -48,33 +51,32 @@ MUJOCO_GPU_RENDERING = False
 PY
 fi
 
-# === MoE-LoRA LIBERO-Goal eval ===
+# === Tokenized-actions LIBERO-Object eval ===
 
 CKPT_DIR="${CKPT_DIR:-}"
 if [ -z "${CKPT_DIR}" ]; then
-  echo "[ERROR] Please set CKPT_DIR to a MoE-LoRA finetune checkpoint directory (contains moe_lora--*_checkpoint.pt)." >&2
+  echo "[ERROR] Please set CKPT_DIR to a merged checkpoint directory (HF-style dir containing config.json/model.safetensors)." >&2
   exit 1
 fi
 
 CONFIG_DIR="${CONFIG_DIR:-pretrained_models/configs}"
-TASK_SUITE_NAME="${TASK_SUITE_NAME:-libero_goal}"
+TASK_SUITE_NAME="${TASK_SUITE_NAME:-libero_object}"
+RUN_ID_NOTE="${RUN_ID_NOTE:-local-token-eval-object}"
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-0}" "${RUNNER[@]}" "${PY_BIN}" experiments/robot/libero/run_libero_eval.py \
   --model_family openvla \
   --pretrained_checkpoint "${CKPT_DIR}" \
   --config_file_path "${CONFIG_DIR}" \
-  --use_moe_lora True \
-  --moe_num_experts 3 \
-  --moe_top_k 2 \
-  --moe_target_modules "all-linear" \
-  --lora_rank 64 \
-  --use_l1_regression True \
+  --use_l1_regression False \
   --use_minivlm True \
   --use_film False \
   --num_images_in_input 2 \
   --use_proprio True \
   --task_suite_name "${TASK_SUITE_NAME}" \
   --env_img_res "${ENV_IMG_RES-128}" \
-  --num_trials_per_task 50 \
+  --num_trials_per_task "${NUM_TRIALS_PER_TASK-50}" \
+  --save_videos "${SAVE_VIDEOS-True}" \
   --use_pro_version True \
+  --local_log_dir "./eval_logs" \
+  --run_id_note "${RUN_ID_NOTE}" \
   "$@"
