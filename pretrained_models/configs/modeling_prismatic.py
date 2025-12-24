@@ -745,8 +745,11 @@ class OpenVLAForActionPrediction(PrismaticForConditionalGeneration):
         self.bins = np.linspace(-1, 1, config.n_action_bins)
         self.bin_centers = (self.bins[:-1] + self.bins[1:]) / 2.0
 
-        # Compute vocab size for de-tokenization -- revert added "multiple of"
-        self.vocab_size = self.config.text_config.vocab_size - self.config.pad_to_multiple_of
+        # Action token IDs are produced by `ActionTokenizer` via `tokenizer_len - discretized_action`.
+        # For Qwen2 tokenization in this repo, `tokenizer_len` matches:
+        #   ACTION_TOKEN_BEGIN_IDX + (n_action_bins + 1)
+        # Keep this separate from the model's LM vocab size (which may be padded).
+        self.action_vocab_size = ACTION_TOKEN_BEGIN_IDX + (config.n_action_bins + 1)
 
     def _prepare_input_for_action_prediction(self, input_ids, attention_mask):
         """Prepares input for action prediction by adding necessary tokens"""
@@ -833,63 +836,79 @@ class OpenVLAForActionPrediction(PrismaticForConditionalGeneration):
             input_embeddings, projected_patch_embeddings, attention_mask
         )
 
-        # Forward pass through language model
-        language_model_output = self.language_model(
-            input_ids=None,
-            attention_mask=multimodal_attention_mask,
-            position_ids=None,
-            past_key_values=None,
-            inputs_embeds=multimodal_embeddings,
-            labels=None,
-            use_cache=None,
-            output_attentions=False,
-            output_hidden_states=True,
-            return_dict=True,
-        )
-
-        # Extract hidden states for action tokens
-        multi_layer_hidden_states = []
-        
-        for item in language_model_output.hidden_states[0:]:
-            # last_hidden_states = output.hidden_states[-1]  # (B, seq_len, D)
-            # Get hidden states for text portion of prompt+response (after the vision patches)
-            text_hidden_states = item
-            # Get hidden states for action portion of response
-            actions_hidden_states = text_hidden_states[:, NUM_PATCHES+ NUM_PROMPT_TOKENS : NUM_PATCHES + NUM_PROMPT_TOKENS + NUM_TOKENS, :,].reshape(1, 1, NUM_TOKENS, -1).to(torch.bfloat16)
-            
-            batch_size = item.shape[0]
-            task_latten_states = item[:, :NUM_PATCHES].reshape(batch_size, 1, NUM_PATCHES , -1)
-            all_hidden_states = torch.cat((task_latten_states, actions_hidden_states),2)
-            multi_layer_hidden_states.append(all_hidden_states)
-            
-        multi_layer_hidden_states = torch.cat(multi_layer_hidden_states, dim = 1)
-        
-
-        # Handle different prediction methods
         if action_head is not None:
+            # Forward pass through language model (need hidden states for regression head)
+            language_model_output = self.language_model(
+                input_ids=None,
+                attention_mask=multimodal_attention_mask,
+                position_ids=None,
+                past_key_values=None,
+                inputs_embeds=multimodal_embeddings,
+                labels=None,
+                use_cache=None,
+                output_attentions=False,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+
+            # Extract hidden states for action tokens
+            multi_layer_hidden_states = []
+
+            for item in language_model_output.hidden_states[0:]:
+                text_hidden_states = item
+                actions_hidden_states = (
+                    text_hidden_states[
+                        :,
+                        NUM_PATCHES + NUM_PROMPT_TOKENS : NUM_PATCHES + NUM_PROMPT_TOKENS + NUM_TOKENS,
+                        :,
+                    ]
+                    .reshape(1, 1, NUM_TOKENS, -1)
+                    .to(torch.bfloat16)
+                )
+
+                batch_size = item.shape[0]
+                task_latten_states = item[:, :NUM_PATCHES].reshape(batch_size, 1, NUM_PATCHES, -1)
+                all_hidden_states = torch.cat((task_latten_states, actions_hidden_states), 2)
+                multi_layer_hidden_states.append(all_hidden_states)
+
+            multi_layer_hidden_states = torch.cat(multi_layer_hidden_states, dim=1)
+
             # L1 regression prediction
             normalized_actions = action_head.predict_action(multi_layer_hidden_states,
                                                 proprio=proprio,
                                                 proprio_projector=proprio_projector)
             normalized_actions = normalized_actions.reshape(NUM_ACTIONS_CHUNK, ACTION_DIM)
             normalized_actions = normalized_actions.float().cpu().detach().numpy()
+            return normalized_actions, actions_hidden_states
         else:
-            # Discrete token-based prediction
-            predicted_action_token_ids = (
-                language_model_output.logits[
-                    :,
-                    NUM_PATCHES + NUM_PROMPT_TOKENS : NUM_PATCHES + NUM_PROMPT_TOKENS + ACTION_DIM * NUM_ACTIONS_CHUNK,
-                ]
-                .argmax(dim=2)
-                .cpu()
-                .numpy()
+            # Forward pass through language model (logits only; avoids huge hidden-state allocations)
+            language_model_output = self.language_model(
+                input_ids=None,
+                attention_mask=multimodal_attention_mask,
+                position_ids=None,
+                past_key_values=None,
+                inputs_embeds=multimodal_embeddings,
+                labels=None,
+                use_cache=None,
+                output_attentions=False,
+                output_hidden_states=False,
+                return_dict=True,
             )
-            discretized_actions = self.vocab_size - predicted_action_token_ids
+
+            # Discrete token-based prediction
+            # HF causal LMs use a 1-token shift for next-token prediction: logits at position `t`
+            # are supervised against `labels[t+1]`. Our training labels place the first action token
+            # immediately after the prompt. Therefore, at inference, the first action token is read
+            # from the logit at the *last prompt position* (prompt_end - 1), not from the first
+            # action placeholder position.
+            start_idx = NUM_PATCHES + NUM_PROMPT_TOKENS - 1
+            end_idx = start_idx + ACTION_DIM * NUM_ACTIONS_CHUNK
+            predicted_action_token_ids = language_model_output.logits[:, start_idx:end_idx].argmax(dim=2).cpu().numpy()
+            discretized_actions = self.action_vocab_size - predicted_action_token_ids
             discretized_actions = np.clip(discretized_actions - 1, a_min=0, a_max=self.bin_centers.shape[0] - 1)
             normalized_actions = self.bin_centers[discretized_actions]
             normalized_actions = normalized_actions.reshape(NUM_ACTIONS_CHUNK, ACTION_DIM)
-
-        return normalized_actions, actions_hidden_states
+            return normalized_actions, None
 
 
     def predict_action(
@@ -926,8 +945,10 @@ class OpenVLAForActionPrediction(PrismaticForConditionalGeneration):
         labels = input_ids.clone()
         labels[:] = IGNORE_INDEX
 
-        # Get number of tokens in prompt (excluding the start token)
-        NUM_PROMPT_TOKENS = input_ids.shape[-1] - 1  # Subtract action tokens and stop token
+        # Number of tokens in the prompt (before appending action placeholders + stop token).
+        # Note: Prismatic inserts vision patches after the first token of `input_ids`, so we keep this as the full
+        # prompt length (no off-by-one BOS assumptions).
+        NUM_PROMPT_TOKENS = input_ids.shape[-1]
 
         # Prepare inputs by adding necessary tokens
         input_ids, attention_mask = self._prepare_input_for_action_prediction(input_ids, attention_mask)

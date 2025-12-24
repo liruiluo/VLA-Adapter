@@ -14,6 +14,12 @@ cd "${ROOT_DIR}"
 
 echo "[INFO] Repo root: ${ROOT_DIR}"
 
+# Ensure repo root is on PYTHONPATH so imports like `experiments.*` work.
+case ":${PYTHONPATH-}:" in
+  *":${ROOT_DIR}:"*) ;;
+  *) export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH-}" ;;
+esac
+
 # 1) 尝试激活本项目自带的 conda 环境 ./env
 #    注意：只有在 *source* 这个脚本时（例如：`source scripts/setup_libero_env.sh`），
 #    conda activate 对当前 shell 才是有效的；直接 `bash scripts/setup_libero_env.sh`
@@ -36,7 +42,10 @@ PYTHON_BIN="$(command -v python || echo python)"
 echo "[INFO] Using python: ${PYTHON_BIN}"
 
 # 3) 把 LIBERO 源码目录挂到 PYTHONPATH（不依赖 pip 是否成功安装 libero）。
-export PYTHONPATH="${ROOT_DIR}/LIBERO:${PYTHONPATH-}"
+case ":${PYTHONPATH-}:" in
+  *":${ROOT_DIR}/LIBERO:"*) ;;
+  *) export PYTHONPATH="${ROOT_DIR}/LIBERO:${PYTHONPATH-}" ;;
+esac
 echo "[INFO] 已将 ${ROOT_DIR}/LIBERO 加入 PYTHONPATH"
 
 # 4) 使用 LIBERO 提供的 API 设置 ~/.libero/config.yaml
