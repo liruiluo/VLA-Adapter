@@ -178,3 +178,4 @@ pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b/
 vla_adapter.egg-info/
 
 third_part
+*.gz
