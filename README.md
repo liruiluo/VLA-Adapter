@@ -78,38 +78,29 @@
 
 
 ### Conda Environment of VLA-Adapter
-
+**Make sure to use an image that has `cann8.0.rc2`.**
 ```bash
-# Create and activate conda environment
-conda create -n vla-adapter python=3.10.16 -y
-conda activate vla-adapter
+# Create and activate conda environment in the current directory
+conda create python=3.10.16 -y -p env
+conda activate ./env
 ```
 
 ### Install Dependencies
 
 ```bash
+
 # Install PyTorch
 # Use a command specific to your machine: https://pytorch.org/get-started/locally/
-pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0
+pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 torch_npu==2.2.0.post2 decorator cloudpickle scipy tornado
 
 # Clone vla-adapter repo and pip install to download dependencies
 git clone https://github.com/OpenHelix-Team/VLA-Adapter.git
 cd VLA-Adapter
 pip install -e .
 
-pip install packaging ninja
-ninja --version; echo $?  # Verify Ninja --> should return exit code "0"
-
-# Install Flash Attention 2 for training (https://github.com/Dao-AILab/flash-attention)
-pip install "flash-attn==2.5.5" --no-build-isolation
-# If you run into difficulty, try `pip cache remove flash_attn` first, or visit the
-# website to download it. (https://github.com/Dao-AILab/flash-attention/releases/tag/v2.5.5)
-# You can download the corresponding `.whl` file according to the cuda version of `nvidia-smi`,
-# and then run `pip install flash_attn-2.5.5+cuXX...whl` to install it. 
-# We use the `flash_attn-2.5.5+cu122torch2.2cxx11abiFALSE-cp310-cp310-linux_x86_64.whl` file.
+# DO NOT install ninja and flash attention
 ```
 
-<br/>
 <br/>
 
 

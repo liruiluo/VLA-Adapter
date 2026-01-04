@@ -13,6 +13,7 @@ from typing import Dict, Optional, Tuple, Type
 import torch.nn.functional as F
 import draccus
 import torch
+import torch_npu
 import torch.distributed as dist
 import torch.nn as nn
 import tqdm
@@ -723,9 +724,9 @@ def finetune(cfg: FinetuneConfig) -> None:
     # GPU setup
     distributed_state = PartialState()
     device_id = distributed_state.local_process_index
-    torch.cuda.set_device(device_id)
-    torch.cuda.empty_cache()
-
+    torch.npu.set_device(device_id)
+    torch.npu.empty_cache()
+    device_id = torch.device(f"npu:{device_id}")
     # Initialize wandb logging
     if distributed_state.is_main_process:
         wandb.init(project=cfg.wandb_project, name=f"ft+{run_id}", mode="offline")

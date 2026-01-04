@@ -158,6 +158,7 @@ def get_llm_backbone_and_tokenizer(
             hf_token=hf_token,
             inference_mode=inference_mode,
             **llm_cfg["kwargs"],
+            use_flash_attention_2=False
         )
         tokenizer = llm_backbone.get_tokenizer()
         return llm_backbone, tokenizer

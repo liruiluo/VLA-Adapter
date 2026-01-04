@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+# ./#!/usr/bin/env bash
+# set -euo pipefail
 
 # Resolve repo root based on script location
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,8 +31,8 @@ fi
 data_name=libero_object_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
-CUDA_VISIBLE_DEVICES=0 \
-"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
+# CUDA_VISIBLE_DEVICES=0 \
+"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 4 vla-scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
   --config_file_path pretrained_models/configs \
   --data_root_dir data/libero \
@@ -50,15 +50,15 @@ CUDA_VISIBLE_DEVICES=0 \
   --save_freq 5000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training True \
-  --batch_size 4 \
-  --grad_accumulation_steps 16 \
+  --batch_size 8 \
+  --grad_accumulation_steps 2 \
   --learning_rate 2e-4 \
   --lora_rank 64 \
   --use_pro_version True \
   --wandb_entity "YOUR_WANDB_ENTITY" \
   --wandb_project "${data_name}" \
   --run_id_note "VLA-Adapter--libero_object_no_noops--${current_time}" \
-  > "logs/VLA-Adapter--libero_object_no_noops--${current_time}.log" 2>&1 &
+  > "logs/VLA-Adapter--libero_object_no_noops--${current_time}.log" 2>&1
 
 echo "[INFO] Launched local finetune for ${data_name}."
 echo "[INFO] Log file: logs/VLA-Adapter--libero_object_no_noops--${current_time}.log"

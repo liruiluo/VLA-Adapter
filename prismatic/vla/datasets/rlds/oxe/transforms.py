@@ -16,6 +16,7 @@ Transforms adopt the following structure:
 """
 
 from typing import Any, Dict
+import math
 
 import tensorflow as tf
 
@@ -27,6 +28,97 @@ from prismatic.vla.datasets.rlds.utils.data_utils import (
     relabel_bridge_actions,
 )
 
+def euler_from_quaternion(quaternions, name: str = "euler_from_quaternion") -> tf.Tensor:
+    """Converts quaternions to Euler angles. https://github.com/tensorflow/graphics/blob/36e707fe51c8d48b0849eed0dea38d63990fc765/tensorflow_graphics/geometry/transformation/euler.py#L67
+
+    Args:
+      quaternions: Tensor of shape [..., 4], in (x, y, z, w) order.
+      name: Name for this op.
+
+    Returns:
+      Tensor of shape [..., 3], representing Euler angles (theta_x, theta_y, theta_z).
+    """
+
+    def nonzero_sign(x):
+        # Matches tensorflow_graphics.safe_ops.nonzero_sign
+        return tf.where(x >= 0, tf.ones_like(x), -tf.ones_like(x))
+
+    def safe_shrink(x, min_val, max_val):
+        # Approximation of safe_ops.safe_shrink
+        return tf.clip_by_value(x, min_val, max_val)
+
+    def select_eps_for_addition(dtype):
+        # Approximation of asserts.select_eps_for_addition
+        return tf.cast(1e-6, dtype)
+
+    def general_case(r00, r10, r21, r22, r20, eps_addition):
+        """Handles the general case."""
+        theta_y = -tf.asin(r20)
+        sign_cos_theta_y = nonzero_sign(tf.cos(theta_y))
+
+        r00 = nonzero_sign(r00) * eps_addition + r00
+        r22 = nonzero_sign(r22) * eps_addition + r22
+
+        theta_z = tf.atan2(r10 * sign_cos_theta_y,
+                            r00 * sign_cos_theta_y)
+        theta_x = tf.atan2(r21 * sign_cos_theta_y,
+                            r22 * sign_cos_theta_y)
+        return tf.stack((theta_x, theta_y, theta_z), axis=-1)
+
+    def gimbal_lock(r01, r02, r20, eps_addition):
+        """Handles gimbal lock cases."""
+        sign_r20 = nonzero_sign(r20)
+
+        r02 = nonzero_sign(r02) * eps_addition + r02
+
+        theta_x = tf.atan2(-sign_r20 * r01,
+                            -sign_r20 * r02)
+        theta_y = -sign_r20 * tf.cast(math.pi / 2.0, r20.dtype)
+        theta_z = tf.zeros_like(theta_x)
+
+        return tf.stack((theta_x, theta_y, theta_z), axis=-1)
+
+    with tf.name_scope(name):
+        quaternions = tf.convert_to_tensor(quaternions)
+        quaternions = tf.ensure_shape(quaternions, quaternions.shape[:-1] + (4,))
+
+        x, y, z, w = tf.unstack(quaternions, axis=-1)
+
+        tx = safe_shrink(2.0 * x, -2.0, 2.0)
+        ty = safe_shrink(2.0 * y, -2.0, 2.0)
+        tz = safe_shrink(2.0 * z, -2.0, 2.0)
+
+        twx = tx * w
+        twy = ty * w
+        twz = tz * w
+        txx = tx * x
+        txy = ty * x
+        txz = tz * x
+        tyy = ty * y
+        tyz = tz * y
+        tzz = tz * z
+
+        r00 = safe_shrink(1.0 - (tyy + tzz), -1.0, 1.0)
+        r10 = safe_shrink(txy + twz, -1.0, 1.0)
+        r21 = safe_shrink(tyz + twx, -1.0, 1.0)
+        r22 = safe_shrink(1.0 - (txx + tyy), -1.0, 1.0)
+        r20 = safe_shrink(txz - twy, -1.0, 1.0)
+        r01 = safe_shrink(txy - twz, -1.0, 1.0)
+        r02 = safe_shrink(txz + twy, -1.0, 1.0)
+
+        eps_addition = select_eps_for_addition(quaternions.dtype)
+
+        general_solution = general_case(
+            r00, r10, r21, r22, r20, eps_addition
+        )
+        gimbal_solution = gimbal_lock(
+            r01, r02, r20, eps_addition
+        )
+
+        is_gimbal = tf.less(tf.abs(tf.abs(r20) - 1.0), 1.0e-6)
+        gimbal_mask = tf.stack((is_gimbal, is_gimbal, is_gimbal), axis=-1)
+
+        return tf.where(gimbal_mask, gimbal_solution, general_solution)
 
 def bridge_oxe_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -418,7 +510,7 @@ def maniskill_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def furniture_bench_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
-    import tensorflow_graphics.geometry.transformation as tft
+    #import tensorflow_graphics.geometry.transformation as tft
 
     trajectory["observation"]["state"] = tf.concat(
         (
@@ -432,7 +524,7 @@ def furniture_bench_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, A
     trajectory["action"] = tf.concat(
         (
             trajectory["action"][:, :3],
-            tft.euler.from_quaternion(trajectory["action"][:, 3:7]),
+            euler_from_quaternion(trajectory["action"][:, 3:7]),
             invert_gripper_actions(tf.clip_by_value(trajectory["action"][:, -1:], 0, 1)),
         ),
         axis=-1,
@@ -638,14 +730,14 @@ def imperial_wristcam_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str,
 
 
 def iamlab_pick_insert_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
-    import tensorflow_graphics.geometry.transformation as tft
+    #import tensorflow_graphics.geometry.transformation as tft
 
     trajectory["observation"]["joint_state"] = trajectory["observation"]["state"][:, :7]
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][:, 7:8]
     trajectory["action"] = tf.concat(
         (
             trajectory["action"][:, :3],
-            tft.euler.from_quaternion(trajectory["action"][:, 3:7]),
+            quaternion_to_euler(trajectory["action"][:, 3:7]),
             trajectory["action"][:, 7:8],
         ),
         axis=-1,
@@ -699,12 +791,12 @@ def berkeley_fanuc_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
 
 
 def cmu_playing_with_food_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
-    import tensorflow_graphics.geometry.transformation as tft
+    #import tensorflow_graphics.geometry.transformation as tft
 
     trajectory["action"] = tf.concat(
         (
             trajectory["action"][:, :3],
-            tft.euler.from_quaternion(trajectory["action"][:, 3:7]),
+            quaternion_to_euler(trajectory["action"][:, 3:7]),
             trajectory["action"][:, -1:],
         ),
         axis=-1,
