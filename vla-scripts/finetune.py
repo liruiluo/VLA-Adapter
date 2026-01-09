@@ -27,7 +27,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoConfig, AutoModelForVision2Seq
 from transformers.modeling_outputs import CausalLMOutputWithPast
 import wandb
 
@@ -42,20 +42,7 @@ from prismatic.training.train_utils import (
     get_next_actions_mask
 )
 from prismatic.util.data_utils import PaddedCollatorForActionPrediction
-from prismatic.vla.action_tokenizer import ActionTokenizer
-from prismatic.vla.constants import (
-    ACTION_DIM,
-    ACTION_PROPRIO_NORMALIZATION_TYPE,
-    NUM_ACTIONS_CHUNK,
-    PROPRIO_DIM,
-    NUM_TOKENS
-)
-from prismatic.vla.datasets import RLDSDataset, RLDSBatchTransform
-from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
-from prismatic.vla.openvla import register_openvla
-from prismatic.models import load, load_vla
-
-
+import prismatic.vla as prismatic_vla
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -65,7 +52,7 @@ class FinetuneConfig:
     # fmt: off
     config_file_path: str = "prismatic/extern/hf"     # Path to OpenVLA HF config/tokenizer assets
     vlm_path: str = "openvla/openvla-7b"             # Path to OpenVLA model (on HuggingFace Hub or stored locally)
-    use_minivlm: bool = False                        # 
+    use_minivlm: bool = False                        #
     resum_vla_path: str = "openvla/openvla-7b"       # Path to OpenVLA model (on HuggingFace Hub or stored locally)
 
     # Dataset
@@ -77,7 +64,7 @@ class FinetuneConfig:
     # Algorithm and architecture
     use_l1_regression: bool = True                   # If True, trains continuous action head with L1 regression objective
     use_diffusion: bool = False                      # If True, trains continuous action head with diffusion modeling objective (DDIM)
-    num_diffusion_steps: int = 50                    # (When `diffusion==True`) Number of diffusion steps for training 
+    num_diffusion_steps: int = 50                    # (When `diffusion==True`) Number of diffusion steps for training
     use_film: bool = False                           # If True, uses FiLM to infuse language inputs into visual features
     num_images_in_input: int = 1                     # Number of images in the VLA input (default: 1)
     use_proprio: bool = False                        # If True, includes robot proprioceptive state in input
@@ -123,34 +110,6 @@ class FinetuneConfig:
     use_pro_version: bool = True                             # the version number
     phase: str = "Training"
     # fmt: on
-
-
-
-def remove_ddp_in_checkpoint(state_dict) -> dict:
-    """
-    Removes the 'module.' prefix from parameter names in a PyTorch model state dictionary that was saved using
-    DistributedDataParallel (DDP).
-
-    When a model is trained using PyTorch's DistributedDataParallel, the saved state dictionary contains parameters
-    prefixed with 'module.'. This function removes these prefixes to make the state dictionary compatible when
-    loading into models that are not yet wrapped in DDP.
-
-    Args:
-        state_dict (dict): PyTorch model state dictionary.
-
-    Returns:
-        dict: A new state dictionary with the same contents but with 'module.' prefixes removed from parameter names.
-              Parameters without the 'module.' prefix remain unchanged.
-    """
-    new_state_dict = {}
-    for k, v in state_dict.items():
-        if k[:7] == "module.":
-            new_state_dict[k[7:]] = v
-        else:
-            new_state_dict[k] = v
-    return new_state_dict
-
-
 
 def get_run_id(cfg) -> str:
     """
@@ -205,7 +164,13 @@ def load_checkpoint(module_name: str, path: str, step: int, device: str = "cpu")
     checkpoint_path = os.path.join(path, f"{module_name}--{step}_checkpoint.pt")
     print(f"Loading checkpoint: {checkpoint_path}")
     state_dict = torch.load(checkpoint_path, weights_only=True, map_location=device)
-    return remove_ddp_in_checkpoint(state_dict)
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k[:7] == "module.":
+            new_state_dict[k[7:]] = v
+        else:
+            new_state_dict[k] = v
+    return new_state_dict
 
 
 
@@ -221,7 +186,7 @@ def count_parameters(module: nn.Module, name: str) -> None:
         None.
     """
     num_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
-    
+
     print(f"# trainable params in {name}: {num_params}")
 
 
@@ -342,28 +307,28 @@ def run_forward_pass(
         predicted_token_ids = output.logits[:, num_patches:-1].argmax(dim=2)
 
         curr_action_accuracy = compute_token_accuracy(
-            predicted_token_ids, 
-            ground_truth_token_ids, 
+            predicted_token_ids,
+            ground_truth_token_ids,
             mask=current_action_mask
             )
         curr_action_l1_loss = compute_actions_l1_loss(
-            action_tokenizer, 
-            predicted_token_ids, 
-            ground_truth_token_ids, 
+            action_tokenizer,
+            predicted_token_ids,
+            ground_truth_token_ids,
             mask=current_action_mask
             )
         next_actions_accuracy = compute_token_accuracy(
-            predicted_token_ids, 
-            ground_truth_token_ids, 
+            predicted_token_ids,
+            ground_truth_token_ids,
             mask=next_actions_mask
             )
         next_actions_l1_loss = compute_actions_l1_loss(
-            action_tokenizer, 
-            predicted_token_ids, 
-            ground_truth_token_ids, 
+            action_tokenizer,
+            predicted_token_ids,
+            ground_truth_token_ids,
             mask=next_actions_mask
             )
-        
+
         metrics.update(
             {
                 "loss_value": loss.item(),  # Detached value for logging
@@ -373,12 +338,12 @@ def run_forward_pass(
                 "next_actions_l1_loss": next_actions_l1_loss.item(),
                 }
             )
-        
+
     # Compute metrics for continuous action representations (L1 regression)
     else:
         # Get last layer hidden states
         multi_layer_hidden_states = []
-        
+
         for item in output.hidden_states[0:]:
             # last_hidden_states = output.hidden_states[-1]  # (B, seq_len, D)
             # Get hidden states for text portion of prompt+response (after the vision patches)
@@ -386,7 +351,7 @@ def run_forward_pass(
             # Get hidden states for action portion of response
             batch_size = batch["input_ids"].shape[0]
             # actions_hidden_states = text_hidden_states[:, -1, :].reshape(batch_size, 1, -1).to(torch.bfloat16)
-            actions_hidden_states = text_hidden_states[current_action_mask | next_actions_mask].reshape(batch_size, 1,NUM_TOKENS, -1).to(torch.bfloat16)
+            actions_hidden_states = text_hidden_states[current_action_mask | next_actions_mask].reshape(batch_size, 1,prismatic_vla.NUM_TOKENS, -1).to(torch.bfloat16)
             task_latten_states = item[:, :num_patches].reshape(batch_size, 1, num_patches , -1)
             all_hidden_states = torch.cat((task_latten_states, actions_hidden_states),2)
             multi_layer_hidden_states.append(all_hidden_states)
@@ -432,24 +397,6 @@ def run_forward_pass(
 
 
 
-def compute_smoothened_metrics(metrics_deques) -> dict:
-    """
-    Compute smoothened metrics from recent deques.
-
-    Args:
-        metrics_deques (dict): Dictionary of deques containing recent metrics.
-
-    Returns:
-        dict: Dictionary of smoothened metrics.
-    """
-    smoothened_metrics = {}
-    for name, deque in metrics_deques.items():
-        if deque and len(deque) > 0:
-            smoothened_metrics[name] = sum(deque) / len(deque)
-    return smoothened_metrics
-
-
-
 def log_metrics_to_wandb(metrics, prefix, step, wandb_entity) -> None:
     """
     Log metrics to Weights & Biases.
@@ -487,7 +434,7 @@ def save_training_checkpoint(
     train_dataset,
     distributed_state,
     new_state_dict,
-    
+
 ) -> None:
     """
     Save all training checkpoints including model components, LoRA adapter, and dataset statistics.
@@ -521,7 +468,7 @@ def save_training_checkpoint(
     if distributed_state.is_main_process:
         os.makedirs(checkpoint_dir, exist_ok=True)
         os.makedirs(adapter_dir, exist_ok=True)
-        save_dataset_statistics(train_dataset.dataset_statistics, checkpoint_dir)
+        prismatic_vla.save_dataset_statistics(train_dataset.dataset_statistics, checkpoint_dir)
         print(f"Saving Model Checkpoint for Step {log_step}")
 
     # Wait for directories to be created
@@ -561,30 +508,16 @@ def save_training_checkpoint(
     # Merge LoRA weights into base model and save resulting model checkpoint
     # Note: Can be very slow on some devices; if so, we recommend merging offline
     if cfg.use_lora and cfg.merge_lora_during_training:
-        if cfg.use_minivlm:
-            config = AutoConfig.from_pretrained(cfg.config_file_path, trust_remote_code=False)
-            base_vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16)  # Create a new model with configuration, the parameters are randomly initialized
-            # print(new_state_dict['action_queries.weight'])
-            new_state_dict['action_queries.weight'] = vla.state_dict()['module.base_model.model.action_queries.weight'].cpu()
-            missing_keys, unexpected_keys = base_vla.load_state_dict(new_state_dict, strict=False)
-            
-        else:
-            base_vla = AutoModelForVision2Seq.from_pretrained(
-            cfg.config_file_path,
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=False,
-            trust_remote_code=False,
-            attn_implementation="eager" if USE_NPU else "flash_attention_2"
-        )
-
-
+        config = AutoConfig.from_pretrained(cfg.config_file_path, trust_remote_code=False)
+        base_vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16)  # Create a new model with configuration, the parameters are randomly initialized
+        # print(new_state_dict['action_queries.weight'])
+        new_state_dict['action_queries.weight'] = vla.state_dict()['module.base_model.model.action_queries.weight'].cpu()
+        missing_keys, unexpected_keys = base_vla.load_state_dict(new_state_dict, strict=False)
         merged_vla = PeftModel.from_pretrained(base_vla, adapter_dir)
         merged_vla = merged_vla.merge_and_unload()
-
         if distributed_state.is_main_process:
             merged_vla.save_pretrained(checkpoint_dir)
             print(f"Saved merged model for Step {log_step} at: {checkpoint_dir}")
-        
         # Wait for merged model to be saved
         dist.barrier()
 
@@ -689,14 +622,17 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     Returns:
         None.
-    """ 
+    """
 
     global RAW_STATE_DICT
 
     assert not (cfg.use_l1_regression and cfg.use_diffusion), (
         "Cannot do both L1 regression and diffusion. Please pick one of them!"
     )
-
+    assert 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path, (
+        "Only support prism-qwen25-extra-dinosiglip-224px-0_5b for now."
+    )
+    assert cfg.use_minivlm, "Only support mini vlm for now."
     # Trim trailing forward slash ('/') in VLA path if it exists
     cfg.config_file_path = cfg.config_file_path.rstrip("/")
     print(f"Fine-tuning OpenVLA Model `{cfg.config_file_path}` on `{cfg.dataset_name}`")
@@ -726,82 +662,26 @@ def finetune(cfg: FinetuneConfig) -> None:
     # Print detected constants
     print(
         "Detected constants:\n"
-        f"\tNUM_ACTIONS_CHUNK: {NUM_ACTIONS_CHUNK}\n"
-        f"\tACTION_DIM: {ACTION_DIM}\n"
-        f"\tPROPRIO_DIM: {PROPRIO_DIM}\n"
-        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {ACTION_PROPRIO_NORMALIZATION_TYPE}"
+        f"\tNUM_ACTIONS_CHUNK: {prismatic_vla.NUM_ACTIONS_CHUNK}\n"
+        f"\tACTION_DIM: {prismatic_vla.ACTION_DIM}\n"
+        f"\tPROPRIO_DIM: {prismatic_vla.PROPRIO_DIM}\n"
+        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {prismatic_vla.ACTION_PROPRIO_NORMALIZATION_TYPE}"
     )
-    # register openvla model to hf
-    register_openvla()
 
 
     # Load processor and VLA
-    processor = AutoProcessor.from_pretrained(cfg.config_file_path, trust_remote_code=False)
-
-    if cfg.use_minivlm:
-        if 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path:
-            vlm = load(
-                cfg.vlm_path,
-                hf_token='',
-                load_for_training=True,
-                use_flash_attention_2=False if USE_NPU else None
-            )
-        else:
-            vlm = load_vla(
-                cfg.vlm_path,
-                hf_token='',
-                load_for_training=True,
-                use_flash_attention_2=False if USE_NPU else None
-            )
-        # Create a model with configuration with parameters randomly initialized
-        config = AutoConfig.from_pretrained(cfg.config_file_path, trust_remote_code=False)
-        vla = AutoModelForVision2Seq.from_config(
-            config, torch_dtype=torch.bfloat16).to(device_id)
-        replace_map = [
-            ("vision_backbone.dino_featurizer", "vision_backbone.featurizer"),
-            ("vision_backbone.siglip_featurizer", "vision_backbone.fused_featurizer"),
-            ("llm_backbone.llm", "language_model"),
-            ("projector.projector.0", "projector.fc1"),
-            ("projector.projector.2", "projector.fc2"),
-            ("projector.projector.4", "projector.fc3"),
-            ("gamma", "scale_factor"),
-            ]
-
-        def rename_state_dict_keys(state_dict, replace_map):
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                new_k = k
-                for old, new in replace_map:
-                    if old in new_k:
-                        new_k = new_k.replace(old, new)
-                new_state_dict[new_k] = v
-            return new_state_dict
-        
-        old_state_dict = vlm.state_dict()
-        RAW_STATE_DICT = rename_state_dict_keys(old_state_dict, replace_map)
-    
-        missing_keys, unexpected_keys = vla.load_state_dict(RAW_STATE_DICT, strict=False)
-        del old_state_dict
-
-    else:
-        RAW_STATE_DICT ={}
-        vla = AutoModelForVision2Seq.from_pretrained(
-            cfg.config_file_path,
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=False,
-            trust_remote_code=False,
-            attn_implementation="eager" if USE_NPU else "flash_attention_2"
-            ).to(device_id)
-
-    # Set number of images in VLA input
-    vla.vision_backbone.set_num_images_in_input(cfg.num_images_in_input)
-
-    # vla.set_version(cfg.version)
+    processor, vla, RAW_STATE_DICT = prismatic_vla.load_vla_adapter(
+        vlm_path=cfg.vlm_path,
+        config_file_path=cfg.config_file_path,
+        device=device_id,
+        num_images_in_input=cfg.num_images_in_input,
+        use_flash_attention_2=False if USE_NPU else None,
+    )
 
     if cfg.use_lora:
         lora_config = LoraConfig(
             r=cfg.lora_rank,
-            lora_alpha= 2 * cfg.lora_rank,
+            lora_alpha=2 * cfg.lora_rank,
             lora_dropout=cfg.lora_dropout,
             target_modules="all-linear",
             init_lora_weights="gaussian",
@@ -847,7 +727,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             "proprio_projector",
             cfg,
             device_id,
-            {"llm_dim": vla.module.llm_dim, "proprio_dim": PROPRIO_DIM},
+            {"llm_dim": vla.module.llm_dim, "proprio_dim": prismatic_vla.PROPRIO_DIM},
             to_bf16=True,
         )
 
@@ -859,9 +739,9 @@ def finetune(cfg: FinetuneConfig) -> None:
         cfg,
         device_id,
         {
-            "input_dim": vla.module.llm_dim, 
-            "hidden_dim": vla.module.llm_dim, 
-            "action_dim": ACTION_DIM,
+            "input_dim": vla.module.llm_dim,
+            "hidden_dim": vla.module.llm_dim,
+            "action_dim": prismatic_vla.ACTION_DIM,
             "use_pro_version": cfg.use_pro_version,
             },
         to_bf16=True,
@@ -894,12 +774,12 @@ def finetune(cfg: FinetuneConfig) -> None:
     # 2. CosineAnnealingLR
     # scheduler = CosineAnnealingLR(
     #         optimizer,
-    #         T_max=cfg.num_steps_before_decay, 
-    #         eta_min=0.0001,          
+    #         T_max=cfg.num_steps_before_decay,
+    #         eta_min=0.0001,
     #         )
 
     # Create Action Tokenizer
-    action_tokenizer = ActionTokenizer(processor.tokenizer)
+    action_tokenizer = prismatic_vla.ActionTokenizer(processor.tokenizer)
 
     # Load Fine-tuning Dataset =>> note that we use an RLDS-formatted dataset following Open X-Embodiment by default.
     #   =>> If you want to use a non-RLDS dataset (e.g., a standard PyTorch Dataset) see the following commented block.
@@ -921,7 +801,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     use_wrist_image = cfg.num_images_in_input > 1
 
     # Create training and optional validation datasets
-    batch_transform = RLDSBatchTransform(
+    batch_transform = prismatic_vla.RLDSBatchTransform(
         action_tokenizer,
         processor.tokenizer,
         image_transform=processor.image_processor.apply_transform,
@@ -930,7 +810,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         use_proprio=cfg.use_proprio,
         use_minivlm=cfg.use_minivlm
         )
-    train_dataset = RLDSDataset(
+    train_dataset = prismatic_vla.RLDSDataset(
         cfg.data_root_dir,
         cfg.dataset_name,
         batch_transform,
@@ -939,7 +819,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         image_aug=cfg.image_aug,
     )
     if cfg.use_val_set:
-        val_dataset = RLDSDataset(
+        val_dataset = prismatic_vla.RLDSDataset(
             cfg.data_root_dir,
             cfg.dataset_name,
             batch_transform,
@@ -951,7 +831,7 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     # [Important] Save dataset statistics so that we can unnormalize actions during inference
     if distributed_state.is_main_process:
-        save_dataset_statistics(train_dataset.dataset_statistics, run_dir)
+        prismatic_vla.save_dataset_statistics(train_dataset.dataset_statistics, run_dir)
 
     # Create collator and dataloader
     collator = PaddedCollatorForActionPrediction(
@@ -1022,7 +902,10 @@ def finetune(cfg: FinetuneConfig) -> None:
             gradient_step_idx = batch_idx // cfg.grad_accumulation_steps
 
             # Compute smoothened train metrics
-            smoothened_metrics = compute_smoothened_metrics(recent_metrics)
+            smoothened_metrics = {}
+            for name, metrics_deque in recent_metrics.items():
+                if metrics_deque and len(metrics_deque) > 0:
+                    smoothened_metrics[name] = sum(metrics_deque) / len(metrics_deque)
 
             # Push Metrics to W&B (every wandb_log_freq gradient steps)
             log_step = gradient_step_idx if not cfg.resume else cfg.resume_step + gradient_step_idx

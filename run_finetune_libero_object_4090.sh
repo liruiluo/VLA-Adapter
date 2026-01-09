@@ -47,7 +47,7 @@ CUDA_VISIBLE_DEVICES=0 \
   --use_minivlm True \
   --image_aug True \
   --num_steps_before_decay 200000 \
-  --max_steps 200005 \
+  --max_steps 5005 \
   --save_freq 5000 \
   --save_latest_checkpoint_only False \
   --merge_lora_during_training True \
