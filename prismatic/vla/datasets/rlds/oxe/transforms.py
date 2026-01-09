@@ -737,7 +737,7 @@ def iamlab_pick_insert_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str
     trajectory["action"] = tf.concat(
         (
             trajectory["action"][:, :3],
-            quaternion_to_euler(trajectory["action"][:, 3:7]),
+            euler_from_quaternion(trajectory["action"][:, 3:7]),
             trajectory["action"][:, 7:8],
         ),
         axis=-1,
@@ -796,7 +796,7 @@ def cmu_playing_with_food_dataset_transform(trajectory: Dict[str, Any]) -> Dict[
     trajectory["action"] = tf.concat(
         (
             trajectory["action"][:, :3],
-            quaternion_to_euler(trajectory["action"][:, 3:7]),
+            euler_from_quaternion(trajectory["action"][:, 3:7]),
             trajectory["action"][:, -1:],
         ),
         axis=-1,
