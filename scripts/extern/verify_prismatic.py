@@ -46,7 +46,7 @@ def verify_prismatic() -> None:
 
     # Load Processor & VLM
     print("[*] Instantiating Processor and Pretrained VLM")
-    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=False)
 
     # === AUTOCAST MODE ===
     # print("[*] Loading in BF16 Autocast Mode")
@@ -67,7 +67,7 @@ def verify_prismatic() -> None:
         attn_implementation="flash_attention_2",
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
-        trust_remote_code=True,
+        trust_remote_code=False,
     ).to(device)
 
     # === 8-BIT QUANTIZATION MODE (`pip install bitsandbytes`) :: [~9GB of VRAM Passive || 10GB of VRAM Active] ===

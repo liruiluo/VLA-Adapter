@@ -243,7 +243,7 @@ data_name=libero_spatial_no_noops
 
 CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
---config_file_path pretrained_models/configs \
+--config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
 --dataset_name $data_name \
 --run_root_dir outputs \
@@ -300,7 +300,7 @@ data_name=libero_spatial_no_noops
 
 CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
---config_file_path pretrained_models/configs \
+--config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
 --dataset_name $data_name \
 --run_root_dir outputs \
@@ -361,7 +361,7 @@ data_name=libero_spatial_no_noops
 
 CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
---config_file_path pretrained_models/configs \
+--config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
 --dataset_name $data_name \
 --run_root_dir outputs \
@@ -420,7 +420,7 @@ data_name=libero_spatial_no_noops
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nnodes 1 --nproc-per-node 4 vla-scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
---config_file_path pretrained_models/configs \
+--config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
 --dataset_name $data_name \
 --run_root_dir outputs \
@@ -702,4 +702,3 @@ We thank [OpenVLA-OFT](https://github.com/moojink/openvla-oft), [MiniVLA](https:
 <a href="https://www.star-history.com/#OpenHelix-Team/VLA-Adapter&Date">
   <img src="https://api.star-history.com/svg?repos=OpenHelix-Team/VLA-Adapter&type=Date" width="400" height="250" />
 </a>
-

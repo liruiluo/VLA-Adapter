@@ -31,11 +31,6 @@ from transformers import AutoConfig, AutoModelForVision2Seq, AutoProcessor
 from transformers.modeling_outputs import CausalLMOutputWithPast
 import wandb
 
-from experiments.robot.openvla_utils import (
-    check_model_logic_mismatch,
-    model_is_on_hf_hub,
-    update_auto_map
-)
 from prismatic.models.action_heads import L1RegressionActionHead
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder
 from prismatic.models.film_vit_wrapper import FiLMedPrismaticVisionBackbone
@@ -68,7 +63,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 @dataclass
 class FinetuneConfig:
     # fmt: off
-    config_file_path: str = "openvla/openvla-7b"     # Path to necessary config files of LA-Adapter
+    config_file_path: str = "prismatic/extern/hf"     # Path to OpenVLA HF config/tokenizer assets
     vlm_path: str = "openvla/openvla-7b"             # Path to OpenVLA model (on HuggingFace Hub or stored locally)
     use_minivlm: bool = False                        # 
     resum_vla_path: str = "openvla/openvla-7b"       # Path to OpenVLA model (on HuggingFace Hub or stored locally)
@@ -567,7 +562,7 @@ def save_training_checkpoint(
     # Note: Can be very slow on some devices; if so, we recommend merging offline
     if cfg.use_lora and cfg.merge_lora_during_training:
         if cfg.use_minivlm:
-            config = AutoConfig.from_pretrained("pretrained_models/configs/config.json")
+            config = AutoConfig.from_pretrained(cfg.config_file_path, trust_remote_code=False)
             base_vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16)  # Create a new model with configuration, the parameters are randomly initialized
             # print(new_state_dict['action_queries.weight'])
             new_state_dict['action_queries.weight'] = vla.state_dict()['module.base_model.model.action_queries.weight'].cpu()
@@ -740,16 +735,8 @@ def finetune(cfg: FinetuneConfig) -> None:
     register_openvla()
 
 
-    # Update config.json and sync model files
-    if distributed_state.is_main_process:
-        update_auto_map(cfg.config_file_path)
-        check_model_logic_mismatch(cfg.config_file_path)
-
-    # Wait for model files to be synced
-    dist.barrier()
-
     # Load processor and VLA
-    processor = AutoProcessor.from_pretrained(cfg.config_file_path, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(cfg.config_file_path, trust_remote_code=False)
 
     if cfg.use_minivlm:
         if 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path:
@@ -767,7 +754,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 use_flash_attention_2=False if USE_NPU else None
             )
         # Create a model with configuration with parameters randomly initialized
-        config = AutoConfig.from_pretrained("pretrained_models/configs/config.json")
+        config = AutoConfig.from_pretrained(cfg.config_file_path, trust_remote_code=False)
         vla = AutoModelForVision2Seq.from_config(
             config, torch_dtype=torch.bfloat16).to(device_id)
         replace_map = [

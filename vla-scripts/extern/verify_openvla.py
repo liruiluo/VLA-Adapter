@@ -34,7 +34,7 @@ def verify_openvla() -> None:
 
     # Load Processor & VLA
     print("[*] Instantiating Processor and Pretrained OpenVLA")
-    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=False)
 
     # === BFLOAT16 + FLASH-ATTN MODE ===
     print("[*] Loading in BF16 with Flash-Attention Enabled")
@@ -43,7 +43,7 @@ def verify_openvla() -> None:
         attn_implementation="flash_attention_2",
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
-        trust_remote_code=True,
+        trust_remote_code=False,
     ).to(device)
 
     # === 8-BIT QUANTIZATION MODE (`pip install bitsandbytes`) :: [~9GB of VRAM Passive || 10GB of VRAM Active] ===

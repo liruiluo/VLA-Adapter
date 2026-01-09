@@ -3,10 +3,6 @@
   "architectures": [
     "OpenVLAForActionPrediction"
   ],
-  "auto_map": {
-    "AutoConfig": "configuration_prismatic.OpenVLAConfig",
-    "AutoModelForVision2Seq": "modeling_prismatic.OpenVLAForActionPrediction"
-  },
   "hf_llm_id": "",
   "image_resize_strategy": "resize-naive",
   "image_sizes": [

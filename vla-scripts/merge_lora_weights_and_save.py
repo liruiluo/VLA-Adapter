@@ -55,7 +55,8 @@ def main(cfg: ConvertConfig) -> None:
             hf_token=hf_token,
             load_for_training=True,
             )
-        config = AutoConfig.from_pretrained("../pretrained_models/configs/config.json")
+        hf_assets_dir = Path(__file__).resolve().parents[1] / "prismatic" / "extern" / "hf"
+        config = AutoConfig.from_pretrained(str(hf_assets_dir), trust_remote_code=False)
         vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16)
         # for name, param in model.named_parameters():
         #     print(f"{name}: {param.shape}")
@@ -90,7 +91,7 @@ def main(cfg: ConvertConfig) -> None:
             cfg.base_checkpoint,
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
-            trust_remote_code=True,
+            trust_remote_code=False,
         )
 
     # Load LoRA weights and merge into base model, then save final checkpoint

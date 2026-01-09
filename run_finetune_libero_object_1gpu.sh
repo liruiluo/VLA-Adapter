@@ -35,7 +35,7 @@ echo "[INFO] Starting 1-GPU finetune for ${data_name}..."
 CUDA_VISIBLE_DEVICES=0 \
 "${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
-  --config_file_path pretrained_models/configs \
+  --config_file_path prismatic/extern/hf \
   --data_root_dir data/libero \
   --dataset_name "${data_name}" \
   --run_root_dir outputs \
@@ -63,4 +63,3 @@ CUDA_VISIBLE_DEVICES=0 \
 
 echo "[INFO] Finished 1-GPU finetune job for ${data_name}."
 echo "[INFO] Log file: logs/VLA-Adapter--object-1GPU--${current_time}.log"
-

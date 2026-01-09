@@ -1,9 +1,5 @@
 
 {
-  "auto_map": {
-    "AutoImageProcessor": "processing_prismatic.PrismaticImageProcessor",
-    "AutoProcessor": "processing_prismatic.PrismaticProcessor"
-  },
   "image_processor_type": "PrismaticImageProcessor",
   "image_resize_strategy": "resize-naive",
   "input_sizes": [
