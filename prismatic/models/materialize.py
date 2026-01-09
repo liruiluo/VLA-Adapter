@@ -149,16 +149,19 @@ def get_llm_backbone_and_tokenizer(
     llm_max_length: int = 2048,
     hf_token: Optional[str] = None,
     inference_mode: bool = False,
+    use_flash_attention_2: Optional[bool] = None,
 ) -> Tuple[LLMBackbone, PreTrainedTokenizerBase]:
     if llm_backbone_id in LLM_BACKBONES:
         llm_cfg = LLM_BACKBONES[llm_backbone_id]
+        llm_kwargs = dict(llm_cfg["kwargs"])
+        if use_flash_attention_2 is not None:
+            llm_kwargs["use_flash_attention_2"] = use_flash_attention_2
         llm_backbone: LLMBackbone = llm_cfg["cls"](
             llm_backbone_id,
             llm_max_length=llm_max_length,
             hf_token=hf_token,
             inference_mode=inference_mode,
-            **llm_cfg["kwargs"],
-            use_flash_attention_2=False
+            **llm_kwargs,
         )
         tokenizer = llm_backbone.get_tokenizer()
         return llm_backbone, tokenizer

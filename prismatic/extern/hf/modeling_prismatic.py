@@ -297,7 +297,7 @@ class PrismaticPreTrainedModel(PreTrainedModel):
 
     _no_split_modules: ClassVar[List[str]] = ["PrismaticProjector"]
     _skip_keys_device_placement: str = "past_key_values"
-    _supports_flash_attn_2: bool = False #True
+    _supports_flash_attn_2: bool = True
 
     def _init_weights(self, module: nn.Module) -> None:
         # Important :: this HF ported version is *not* meant for training from scratch; only inference and fine-tuning!

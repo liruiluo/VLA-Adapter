@@ -13,7 +13,11 @@ from typing import Dict, Optional, Tuple, Type
 import torch.nn.functional as F
 import draccus
 import torch
-import torch_npu
+try:
+    import torch_npu
+    USE_NPU = True
+except ImportError:
+    USE_NPU = False
 import torch.distributed as dist
 import torch.nn as nn
 import tqdm
@@ -213,22 +217,6 @@ def load_checkpoint(module_name: str, path: str, step: int, device: str = "cpu")
 
 
 
-def wrap_ddp(module: nn.Module, device_id: int, find_unused: bool = False) -> DDP:
-    """
-    Wrap a module with DistributedDataParallel.
-
-    Args:
-        module (nn.Module): PyTorch module.
-        device_id (str): Device ID.
-        find_unused (bool): Whether to detect parameters without gradients in distributed training.
-
-    Returns:
-        DistributedDataParallel: PyTorch module wrapped with DDP.
-    """
-    return DDP(module, device_ids=[device_id], find_unused_parameters=find_unused, gradient_as_bucket_view=True)
-
-
-
 def count_parameters(module: nn.Module, name: str) -> None:
     """
     Counts and prints the number of trainable parameters in a module.
@@ -250,7 +238,7 @@ def init_module(
     module_class: Type[nn.Module],
     module_name: str,
     cfg: FinetuneConfig,
-    device_id: int,
+    device_id: int | torch.device,
     module_args: dict,
     to_bf16: bool = False,
     find_unused_params: bool = False,
@@ -262,7 +250,7 @@ def init_module(
         module_class (Type[nn.Module]): Class of PyTorch module to initialize.
         module_name (str): Name of model component to load checkpoint for.
         cfg (FinetuneConfig): Training configuration.
-        device_id (str): Device ID.
+        device_id (str | torch.device): Device ID.
         module_args (dict): Args for initializing the module.
         to_bf16 (bool): Whether to convert to torch.bfloat16 data type.
         find_unused_params (bool): Whether to detect parameters without gradients in distributed training.
@@ -281,8 +269,11 @@ def init_module(
     if to_bf16:
         module = module.to(torch.bfloat16)
     module = module.to(device_id)
-
-    return wrap_ddp(module, device_id, find_unused_params)
+    module = DDP(module,
+                 device_ids=[device_id],
+                 find_unused_parameters=find_unused_params,
+                 gradient_as_bucket_view=True)
+    return module
 
 
 
@@ -311,7 +302,7 @@ def run_forward_pass(
         proprio_projector (nn.Module): Proprioceptive state projector module.
         batch (dict): Input batch.
         action_tokenizer (ActionTokenizer): Action tokenizer.
-        device_id (str): Device ID.
+        device_id (str|torch.device): Device ID.
         use_l1_regression (bool): Whether to use L1 regression.
         use_diffusion (bool): Whether to use diffusion.
         use_proprio (bool): Whether to use proprioceptive state as input.
@@ -333,7 +324,7 @@ def run_forward_pass(
     noise, noisy_actions, diffusion_timestep_embeddings = None, None, None
 
     # VLA forward pass
-    with torch.autocast("cuda", dtype=torch.bfloat16):
+    with torch.autocast("npu" if USE_NPU else "cuda", dtype=torch.bfloat16):
         output: CausalLMOutputWithPast = vla(
             input_ids=batch["input_ids"].to(device_id),
             attention_mask=batch["attention_mask"].to(device_id),
@@ -587,7 +578,11 @@ def save_training_checkpoint(
             
         else:
             base_vla = AutoModelForVision2Seq.from_pretrained(
-            cfg.config_file_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=False, trust_remote_code=False
+            cfg.config_file_path,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=False,
+            trust_remote_code=False,
+            attn_implementation="eager" if USE_NPU else "flash_attention_2"
         )
 
 
@@ -721,12 +716,17 @@ def finetune(cfg: FinetuneConfig) -> None:
     run_dir = cfg.run_root_dir / run_id
     os.makedirs(run_dir, exist_ok=True)
 
-    # GPU setup
+    # Device setup
     distributed_state = PartialState()
     device_id = distributed_state.local_process_index
-    torch.npu.set_device(device_id)
-    torch.npu.empty_cache()
-    device_id = torch.device(f"npu:{device_id}")
+    if USE_NPU:
+        torch.npu.set_device(device_id)
+        torch.npu.empty_cache()
+        device_id = torch.device(f"npu:{device_id}")
+    else:
+        torch.cuda.set_device(device_id)
+        torch.cuda.empty_cache()
+        device_id = torch.device(f"cuda:{device_id}")
     # Initialize wandb logging
     if distributed_state.is_main_process:
         wandb.init(project=cfg.wandb_project, name=f"ft+{run_id}", mode="offline")
@@ -779,13 +779,19 @@ def finetune(cfg: FinetuneConfig) -> None:
         hf_token = ''
         if 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path:
             
-            vlm = load(cfg.vlm_path, hf_token=hf_token, load_for_training=True)
+            vlm = load(
+                cfg.vlm_path,
+                hf_token=hf_token,
+                load_for_training=True,
+                use_flash_attention_2=False if USE_NPU else None
+            )
         else:
             vlm = load_vla(
                 cfg.vlm_path,
                 hf_token=hf_token,
                 load_for_training=True,
-                )
+                use_flash_attention_2=False if USE_NPU else None
+            )
         config = AutoConfig.from_pretrained("pretrained_models/configs/config.json")
         vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16).to(device_id)  # Create a new model with configuration, the parameters are randomly initialized
         # for name, param in model.named_parameters():
@@ -823,6 +829,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=False,
             trust_remote_code=False,
+            attn_implementation="eager" if USE_NPU else "flash_attention_2"
             ).to(device_id)
 
     # Set number of images in VLA input
@@ -867,8 +874,11 @@ def finetune(cfg: FinetuneConfig) -> None:
         vla.model.vision_backbone = vla.model.vision_backbone.to(device_id)
 
     # Wrap VLA with DDP
-    vla = wrap_ddp(vla, device_id, find_unused=True)
-
+    vla = DDP(
+        vla,
+        device_ids=[device_id],
+        find_unused_parameters=True,
+        gradient_as_bucket_view=True)
     # If applicable, instantiate proprio projector
     if cfg.use_proprio:
         proprio_projector = init_module(
