@@ -6,11 +6,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
 mkdir -p logs
-mkdir -p hf_cache timm_cache
+mkdir -p hf_cache
 
-# Redirect HF / timm cache to project disk (avoid small $HOME quota)
+# Redirect HF cache to project disk (avoid small $HOME quota)
 export HF_HOME="${ROOT_DIR}/hf_cache"
-export TIMM_CACHE_DIR="${ROOT_DIR}/timm_cache"
 
 # Use EGL for consistency with eval (harmless for training)
 export MUJOCO_GL=egl
@@ -31,8 +30,7 @@ fi
 data_name=libero_object_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
-# CUDA_VISIBLE_DEVICES=0 \
-"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 4 vla-scripts/finetune.py \
+"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 4 scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
   --config_file_path prismatic/extern/hf \
   --data_root_dir data/libero \

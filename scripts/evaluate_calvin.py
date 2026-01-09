@@ -209,8 +209,9 @@ def evaluate_policy(model, env, eval_sr_path, eval_result_path, num_procs, procs
 
 
     if enrich_lang:
-        with open('/root/RoboDual/vla-scripts/enrich_lang_annotations.json', 'r') as f:
-            val_annotations = json.load(f)
+        enrich_lang_annotations_path = Path(__file__).resolve().parent / "enrich_lang_annotations.json"
+        with open(enrich_lang_annotations_path, "r") as file:
+            val_annotations = json.load(file)
     else:
         val_annotations = OmegaConf.load(conf_dir / "annotations/new_playtable_validation.yaml")
 

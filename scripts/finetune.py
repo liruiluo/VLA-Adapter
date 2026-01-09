@@ -42,7 +42,7 @@ from prismatic.training.train_utils import (
     get_next_actions_mask
 )
 from prismatic.util.data_utils import PaddedCollatorForActionPrediction
-import prismatic.vla as prismatic_vla
+import prismatic.vla
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -351,7 +351,7 @@ def run_forward_pass(
             # Get hidden states for action portion of response
             batch_size = batch["input_ids"].shape[0]
             # actions_hidden_states = text_hidden_states[:, -1, :].reshape(batch_size, 1, -1).to(torch.bfloat16)
-            actions_hidden_states = text_hidden_states[current_action_mask | next_actions_mask].reshape(batch_size, 1,prismatic_vla.NUM_TOKENS, -1).to(torch.bfloat16)
+            actions_hidden_states = text_hidden_states[current_action_mask | next_actions_mask].reshape(batch_size, 1,prismatic.vla.NUM_TOKENS, -1).to(torch.bfloat16)
             task_latten_states = item[:, :num_patches].reshape(batch_size, 1, num_patches , -1)
             all_hidden_states = torch.cat((task_latten_states, actions_hidden_states),2)
             multi_layer_hidden_states.append(all_hidden_states)
@@ -468,7 +468,7 @@ def save_training_checkpoint(
     if distributed_state.is_main_process:
         os.makedirs(checkpoint_dir, exist_ok=True)
         os.makedirs(adapter_dir, exist_ok=True)
-        prismatic_vla.save_dataset_statistics(train_dataset.dataset_statistics, checkpoint_dir)
+        prismatic.vla.save_dataset_statistics(train_dataset.dataset_statistics, checkpoint_dir)
         print(f"Saving Model Checkpoint for Step {log_step}")
 
     # Wait for directories to be created
@@ -662,15 +662,15 @@ def finetune(cfg: FinetuneConfig) -> None:
     # Print detected constants
     print(
         "Detected constants:\n"
-        f"\tNUM_ACTIONS_CHUNK: {prismatic_vla.NUM_ACTIONS_CHUNK}\n"
-        f"\tACTION_DIM: {prismatic_vla.ACTION_DIM}\n"
-        f"\tPROPRIO_DIM: {prismatic_vla.PROPRIO_DIM}\n"
-        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {prismatic_vla.ACTION_PROPRIO_NORMALIZATION_TYPE}"
+        f"\tNUM_ACTIONS_CHUNK: {prismatic.vla.NUM_ACTIONS_CHUNK}\n"
+        f"\tACTION_DIM: {prismatic.vla.ACTION_DIM}\n"
+        f"\tPROPRIO_DIM: {prismatic.vla.PROPRIO_DIM}\n"
+        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {prismatic.vla.ACTION_PROPRIO_NORMALIZATION_TYPE}"
     )
 
 
     # Load processor and VLA
-    processor, vla, RAW_STATE_DICT = prismatic_vla.load_vla_adapter(
+    processor, vla, RAW_STATE_DICT = prismatic.vla.load_vla_adapter(
         vlm_path=cfg.vlm_path,
         config_file_path=cfg.config_file_path,
         device=device_id,
@@ -727,7 +727,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             "proprio_projector",
             cfg,
             device_id,
-            {"llm_dim": vla.module.llm_dim, "proprio_dim": prismatic_vla.PROPRIO_DIM},
+            {"llm_dim": vla.module.llm_dim, "proprio_dim": prismatic.vla.PROPRIO_DIM},
             to_bf16=True,
         )
 
@@ -741,7 +741,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         {
             "input_dim": vla.module.llm_dim,
             "hidden_dim": vla.module.llm_dim,
-            "action_dim": prismatic_vla.ACTION_DIM,
+            "action_dim": prismatic.vla.ACTION_DIM,
             "use_pro_version": cfg.use_pro_version,
             },
         to_bf16=True,
@@ -779,7 +779,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     #         )
 
     # Create Action Tokenizer
-    action_tokenizer = prismatic_vla.ActionTokenizer(processor.tokenizer)
+    action_tokenizer = prismatic.vla.ActionTokenizer(processor.tokenizer)
 
     # Load Fine-tuning Dataset =>> note that we use an RLDS-formatted dataset following Open X-Embodiment by default.
     #   =>> If you want to use a non-RLDS dataset (e.g., a standard PyTorch Dataset) see the following commented block.
@@ -801,7 +801,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     use_wrist_image = cfg.num_images_in_input > 1
 
     # Create training and optional validation datasets
-    batch_transform = prismatic_vla.RLDSBatchTransform(
+    batch_transform = prismatic.vla.RLDSBatchTransform(
         action_tokenizer,
         processor.tokenizer,
         image_transform=processor.image_processor.apply_transform,
@@ -810,7 +810,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         use_proprio=cfg.use_proprio,
         use_minivlm=cfg.use_minivlm
         )
-    train_dataset = prismatic_vla.RLDSDataset(
+    train_dataset = prismatic.vla.RLDSDataset(
         cfg.data_root_dir,
         cfg.dataset_name,
         batch_transform,
@@ -819,7 +819,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         image_aug=cfg.image_aug,
     )
     if cfg.use_val_set:
-        val_dataset = prismatic_vla.RLDSDataset(
+        val_dataset = prismatic.vla.RLDSDataset(
             cfg.data_root_dir,
             cfg.dataset_name,
             batch_transform,
@@ -831,7 +831,7 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     # [Important] Save dataset statistics so that we can unnormalize actions during inference
     if distributed_state.is_main_process:
-        prismatic_vla.save_dataset_statistics(train_dataset.dataset_statistics, run_dir)
+        prismatic.vla.save_dataset_statistics(train_dataset.dataset_statistics, run_dir)
 
     # Create collator and dataloader
     collator = PaddedCollatorForActionPrediction(

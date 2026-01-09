@@ -215,7 +215,7 @@ We use the `Prismatic-VLMs` architecture. Since the file is large, please downlo
 **We provide different training configurations for different users. You can choose the configuration suitable for training based on your GPU card type.**
 
 ### :books: Related File for Training
-* `vla-scripts/finetune.py`: VLA fine-tuning script
+* `scripts/finetune.py`: VLA fine-tuning script
 
 
 ### :ledger: How to Train on Extremely Limited VRAM GPUs
@@ -241,7 +241,7 @@ In addition, we recently released an enhanced version `Pro` of the VLA-Adapter. 
  ```bash
 data_name=libero_spatial_no_noops
 
-CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
+CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
 --config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
@@ -298,7 +298,7 @@ In addition, we recently released an enhanced version `Pro` of the VLA-Adapter. 
  ```bash
 data_name=libero_spatial_no_noops
 
-CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
+CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
 --config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
@@ -359,7 +359,7 @@ In addition, we recently released an enhanced version `Pro` of the VLA-Adapter. 
  ```bash
 data_name=libero_spatial_no_noops
 
-CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
+CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nnodes 1 --nproc-per-node 1 scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
 --config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
@@ -418,7 +418,7 @@ In addition, we recently released an enhanced version `Pro` of the VLA-Adapter. 
 ```bash
 data_name=libero_spatial_no_noops
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nnodes 1 --nproc-per-node 4 vla-scripts/finetune.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nnodes 1 --nproc-per-node 4 scripts/finetune.py \
 --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
 --config_file_path prismatic/extern/hf \
 --data_root_dir data/libero \
@@ -534,7 +534,7 @@ CUDA_VISIBLE_DEVICES=0 python experiments/robot/libero/run_libero_eval.py \
 
 
 # Launch CALVIN ABC→D-Pro evals (Background running)
-CUDA_VISIBLE_DEVICES=0 python vla-scripts/evaluate_calvin.py \
+CUDA_VISIBLE_DEVICES=0 python scripts/evaluate_calvin.py \
   --pretrained_checkpoint outputs/CALVIN-ABC-Pro \
   > eval_logs/CALVIN--ABC.log 2>&1 &
 ```

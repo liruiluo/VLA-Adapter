@@ -175,3 +175,5 @@ pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b/
 
 # Local build metadata
 vla_adapter.egg-info/
+
+AGENTS.md

@@ -11,10 +11,9 @@ cd "${ROOT_DIR}"
 
 mkdir -p logs
 
-# Redirect HF / timm cache to project disk (avoid small $HOME quota)
+# Redirect HF cache to project disk (avoid small $HOME quota)
 export HF_HOME="${ROOT_DIR}/hf_cache"
-export TIMM_CACHE_DIR="${ROOT_DIR}/timm_cache"
-mkdir -p "${HF_HOME}" "${TIMM_CACHE_DIR}"
+mkdir -p "${HF_HOME}"
 
 # For consistency with eval env; harmless for pure training
 export MUJOCO_GL=egl
@@ -33,7 +32,7 @@ echo "[INFO] Starting 1-GPU finetune for ${data_name}..."
 
 # 1-GPU (>=80GB) training VLA-Adapter-Pro on LIBERO-Object
 CUDA_VISIBLE_DEVICES=0 \
-"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 1 vla-scripts/finetune.py \
+"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 1 scripts/finetune.py \
   --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
   --config_file_path prismatic/extern/hf \
   --data_root_dir data/libero \
