@@ -22,13 +22,12 @@ import torch.distributed as dist
 import torch.nn as nn
 import tqdm
 from accelerate import PartialState
-from huggingface_hub import HfApi, snapshot_download
 from peft import LoraConfig, PeftModel, get_peft_model
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, AutoImageProcessor, AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoConfig, AutoModelForVision2Seq, AutoProcessor
 from transformers.modeling_outputs import CausalLMOutputWithPast
 import wandb
 
@@ -37,9 +36,6 @@ from experiments.robot.openvla_utils import (
     model_is_on_hf_hub,
     update_auto_map
 )
-from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
-from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
-from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 from prismatic.models.action_heads import L1RegressionActionHead
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder
 from prismatic.models.film_vit_wrapper import FiLMedPrismaticVisionBackbone
@@ -61,6 +57,7 @@ from prismatic.vla.constants import (
 )
 from prismatic.vla.datasets import RLDSDataset, RLDSBatchTransform
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
+from prismatic.vla.openvla import register_openvla
 from prismatic.models import load, load_vla
 
 
@@ -739,28 +736,8 @@ def finetune(cfg: FinetuneConfig) -> None:
         f"\tPROPRIO_DIM: {PROPRIO_DIM}\n"
         f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {ACTION_PROPRIO_NORMALIZATION_TYPE}"
     )
-
-    # Two options:
-    # (1) Base model is on Hugging Face Hub
-    #   - Then download it and record the path to the download directory
-    # (2) Base model is stored locally
-    #   - Then register model config in HF Auto Classes
-    # In both cases, we want to check whether any changes have been made to
-    # the `modeling_prismatic.py` file in this codebase; if so, we will copy
-    # the file to the downloaded or locally stored checkpoint directory so
-    # that the user's changes to the VLA class logic go into effect
-
-    if model_is_on_hf_hub(cfg.config_file_path):
-        # Download model directly from Hugging Face Hub
-        vla_download_path = snapshot_download(repo_id=cfg.config_file_path)
-        # Overwrite VLA path
-        cfg.config_file_path = vla_download_path
-    else:
-        # Register OpenVLA model to HF Auto Classes (not needed if the model is on HF Hub)
-        AutoConfig.register("openvla", OpenVLAConfig)
-        AutoImageProcessor.register(OpenVLAConfig, PrismaticImageProcessor)
-        AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
-        AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
+    # register openvla model to hf
+    register_openvla()
 
 
     # Update config.json and sync model files
@@ -772,30 +749,27 @@ def finetune(cfg: FinetuneConfig) -> None:
     dist.barrier()
 
     # Load processor and VLA
-    AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
     processor = AutoProcessor.from_pretrained(cfg.config_file_path, trust_remote_code=True)
 
     if cfg.use_minivlm:
-        hf_token = ''
         if 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path:
-            
             vlm = load(
                 cfg.vlm_path,
-                hf_token=hf_token,
+                hf_token='',
                 load_for_training=True,
                 use_flash_attention_2=False if USE_NPU else None
             )
         else:
             vlm = load_vla(
                 cfg.vlm_path,
-                hf_token=hf_token,
+                hf_token='',
                 load_for_training=True,
                 use_flash_attention_2=False if USE_NPU else None
             )
+        # Create a model with configuration with parameters randomly initialized
         config = AutoConfig.from_pretrained("pretrained_models/configs/config.json")
-        vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16).to(device_id)  # Create a new model with configuration, the parameters are randomly initialized
-        # for name, param in model.named_parameters():
-        #     print(f"{name}: {param.shape}")
+        vla = AutoModelForVision2Seq.from_config(
+            config, torch_dtype=torch.bfloat16).to(device_id)
         replace_map = [
             ("vision_backbone.dino_featurizer", "vision_backbone.featurizer"),
             ("vision_backbone.siglip_featurizer", "vision_backbone.fused_featurizer"),
