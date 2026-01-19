@@ -157,12 +157,19 @@ class FSDPStrategy(TrainingStrategy):
             )
 
         # <FSDP> => note that FSDP will automatically take care of device placement (similar to `autocast`)
+        # Support both CUDA and NPU
+        try:
+            import torch_npu
+            current_device = torch.npu.current_device() if torch.npu.is_available() else torch.cuda.current_device()
+        except ImportError:
+            current_device = torch.cuda.current_device()
+        
         self.vlm = FSDP(
             self.vlm,
             auto_wrap_policy=vlm_fsdp_wrapping_policy,
             mixed_precision=fsdp_precision_policy,
             sharding_strategy=self.fsdp_sharding_strategy,
-            device_id=torch.cuda.current_device(),
+            device_id=current_device,
             limit_all_gathers=True,
             use_orig_params=True,
         )

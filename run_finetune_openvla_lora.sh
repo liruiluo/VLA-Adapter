@@ -1,4 +1,4 @@
-# ./#!/usr/bin/env bash
+#!/usr/bin/env bash
 # set -euo pipefail
 
 # Resolve repo root based on script location
@@ -15,7 +15,7 @@ export HF_HOME="${ROOT_DIR}/hf_cache"
 export MUJOCO_GL=egl
 
 # Set model type for ACTION_TOKEN_BEGIN_IDX detection
-export VLA_MODEL_TYPE=VLA_ADAPTER
+export VLA_MODEL_TYPE=OPENVLA
 export PYOPENGL_PLATFORM=egl
 
 # Auto-activate local virtualenv if present
@@ -30,36 +30,35 @@ if [ ! -x "${TORCHRUN_BIN}" ]; then
   TORCHRUN_BIN="torchrun"
 fi
 
+# Configuration
 data_name=libero_object_no_noops
 current_time=$(date "+%Y-%m-%d_%H-%M-%S")
 
-"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 4 scripts/finetune.py \
-  --vlm_path /models/zhangguoxi/prism-qwen25-extra-dinosiglip-224px-0_5b \
-  --config_file_path /root/sylvia/VLA-Adapter/prismatic/extern/hf \
+# LoRA Fine-tuning with HF Model
+"${TORCHRUN_BIN}" --standalone --nnodes 1 --nproc-per-node 4 scripts/finetune_openvla.py \
+  --vla_path /models/zhangguoxi/openvla-7b \
   --data_root_dir /datasets/zhangguoxi/modified_libero_rlds \
   --dataset_name "${data_name}" \
-  --run_root_dir outputs \
-  --use_film False \
-  --num_images_in_input 2 \
-  --use_proprio True \
   --use_lora True \
-  --use_fz False \
-  --use_minivlm True \
   --image_aug True \
-  --num_steps_before_decay 200000 \
-  --max_steps 5005 \
-  --save_freq 5000 \
-  --save_latest_checkpoint_only False \
-  --merge_lora_during_training True \
-  --batch_size 8 \
-  --grad_accumulation_steps 2 \
-  --learning_rate 2e-4 \
+  --use_hf_model True \
+  --training_mode lora \
+  --use_lora True \
   --lora_rank 64 \
-  --use_pro_version True \
-  --wandb_entity "YOUR_WANDB_ENTITY" \
-  --wandb_project "${data_name}" \
-  --run_id_note "VLA-Adapter--libero_object_no_noops--${current_time}" \
-  > "logs/VLA-Adapter--libero_object_no_noops--${current_time}.log" 2>&1
+  --lora_dropout 0.0 \
+  --batch_size 8 \
+  --max_steps 5005 \
+  --save_steps 5000 \
+  --learning_rate 2e-4 \
+  --grad_accumulation_steps 2 \
+  --image_aug True \
+  --shuffle_buffer_size 100000 \
+  --save_latest_checkpoint_only True \
+  --wandb_entity "yiyangchen-sylvia-bigai" \
+  --wandb_project "openvla-lora" \
+  --run_id_note "lora-${data_name}--${current_time}" \
+  > "logs/openvla-lora-${data_name}--${current_time}.log" 2>&1
 
-echo "[INFO] Launched local finetune for ${data_name}."
-echo "[INFO] Log file: logs/VLA-Adapter--libero_object_no_noops--${current_time}.log"
+echo "[INFO] Launched LoRA fine-tuning for ${data_name}."
+echo "[INFO] Log file: logs/openvla-lora-${data_name}--${current_time}.log"
+
