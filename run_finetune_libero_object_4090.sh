@@ -19,6 +19,9 @@ mkdir -p "${HF_HOME}"
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
 
+# Set model type for ACTION_TOKEN_BEGIN_IDX detection
+export VLA_MODEL_TYPE=VLA_ADAPTER
+
 # Prefer the project-local Python/torchrun if available
 TORCHRUN_BIN="${ROOT_DIR}/env/bin/torchrun"
 if [ ! -x "${TORCHRUN_BIN}" ]; then

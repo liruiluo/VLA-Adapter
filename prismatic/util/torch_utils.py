@@ -79,6 +79,16 @@ def worker_init_function(worker_id: int) -> None:
 
 def check_bloat16_supported() -> bool:
     try:
+        # Check for NPU support first
+        try:
+            import torch_npu
+            if torch.npu.is_available():
+                # NPU supports bfloat16
+                return True
+        except ImportError:
+            pass
+        
+        # Check for CUDA support
         import packaging.version
         import torch.cuda.nccl as nccl
         import torch.distributed as dist

@@ -22,6 +22,15 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from prismatic.models.vlms import PrismaticVLM
 from prismatic.overwatch import initialize_overwatch
 from prismatic.training.metrics import Metrics, VLAMetrics
+
+# Detect NPU support
+try:
+    import torch_npu
+    USE_NPU = True
+    DEVICE_TYPE = "npu"
+except ImportError:
+    USE_NPU = False
+    DEVICE_TYPE = "cuda"
 from prismatic.training.train_utils import (
     compute_actions_l1_loss,
     compute_token_accuracy,
@@ -297,7 +306,7 @@ class TrainingStrategy(ABC):
                 # Note that we'll unpack batch (and let AMP/FSDP do its thing) in the VLM.forward() call
                 #   => Basically, if we're using mixed precision (or not), autocast()/FSDP will move to device!
                 with torch.autocast(
-                    "cuda", dtype=self.mixed_precision_dtype, enabled=self.enable_mixed_precision_training
+                    DEVICE_TYPE, dtype=self.mixed_precision_dtype, enabled=self.enable_mixed_precision_training
                 ):
                     # [Contract] self.vlm.forward() must automatically compute `loss` and return!
                     output: CausalLMOutputWithPast = self.vlm(
