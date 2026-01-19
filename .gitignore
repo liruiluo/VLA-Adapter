@@ -158,6 +158,9 @@ outputs/
 logs/
 experiments/logs/
 eval_logs/
+runs/
+kernel_meta/
+adapter-tmp/
 
 # Model and cache directories
 hf_cache/
