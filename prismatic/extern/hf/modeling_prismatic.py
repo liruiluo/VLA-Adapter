@@ -647,7 +647,7 @@ class PrismaticForConditionalGeneration(PrismaticPreTrainedModel):
                 position_ids=None,
                 past_key_values=None,
                 inputs_embeds=multimodal_embeddings,
-                labels=None,
+                labels=multimodal_labels,
                 use_cache=use_cache,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
@@ -679,6 +679,7 @@ class PrismaticForConditionalGeneration(PrismaticPreTrainedModel):
 
         return PrismaticCausalLMOutputWithPast(
             loss=language_model_output.loss,
+            logits=language_model_output.logits,
             past_key_values=language_model_output.past_key_values,
             hidden_states=language_model_output.hidden_states,
             attentions=language_model_output.attentions,
