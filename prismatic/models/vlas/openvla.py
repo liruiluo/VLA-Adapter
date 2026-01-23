@@ -1,8 +1,11 @@
 """
 openvla.py
 
-PyTorch Module defining OpenVLA as a lightweight wrapper around a PrismaticVLM; defines custom logic around
-discretizing actions with the ActionTokenizer.
+PyTorch Module defining OpenVLA and VLAAdapter as lightweight wrappers around a PrismaticVLM; 
+defines custom logic around discretizing actions with the ActionTokenizer.
+
+- OpenVLA: Original token-based action prediction
+- VLAAdapter: Extended with L1 regression, proprio, multi-image, action chunking
 """
 
 from typing import Dict, List, Optional, Union
@@ -11,17 +14,24 @@ import numpy as np
 import torch
 from PIL.Image import Image as Img
 from transformers import LlamaTokenizerFast
-from transformers.models.qwen2.tokenization_qwen2_fast import Qwen2TokenizerFast
+from transformers.models.qwen2.tokenization_qwen2_fast import Qwen2TokenizerFast # Add
 
 from prismatic.models.vlms.prismatic import PrismaticVLM
 from prismatic.overwatch import initialize_overwatch
 from prismatic.vla.action_tokenizer import ActionTokenizer
+
+try:
+    import torch_npu
+    USE_NPU = True
+except ImportError:
+    USE_NPU = False
 
 # Initialize Overwatch =>> Wraps `logging.Logger`
 overwatch = initialize_overwatch(__name__)
 
 
 class OpenVLA(PrismaticVLM):
+    """Original OpenVLA model (token-based action prediction)."""
     def __init__(
         self,
         *args,
@@ -32,6 +42,20 @@ class OpenVLA(PrismaticVLM):
         super().__init__(*args, **kwargs)
         self.norm_stats = norm_stats
         self.action_tokenizer = action_tokenizer
+
+    def _process_input_ids(self, input_ids, tokenizer):
+        """
+        Base class default processing logic (specifically a hack for Llama 2).
+        If OpenVLA switches to other backbones in the future, modifications can be made here.
+        """
+        if isinstance(tokenizer, LlamaTokenizerFast):
+            # Llama 2 specific hack: Ensure the prompt ends with a space token
+            if not torch.all(input_ids[:, -1] == 29871):
+                input_ids = torch.cat(
+                    (input_ids, torch.unsqueeze(torch.Tensor([29871]).long(), dim=0).to(input_ids.device)), dim=1
+                )
+            return input_ids
+        raise ValueError(f"Unsupported `tokenizer` type = {type(tokenizer)}")
 
     @torch.inference_mode()
     def predict_action(
@@ -56,18 +80,8 @@ class OpenVLA(PrismaticVLM):
 
         # Prepare Inputs
         input_ids = tokenizer(prompt_text, truncation=True, return_tensors="pt").input_ids.to(self.device)
-        if isinstance(tokenizer, LlamaTokenizerFast):
-            # If the special empty token ('') does not already appear after the colon (':') token in the prompt
-            # (after "OUT:" or "ASSISTANT:"), insert it to match the inputs seen at training time
-            if not torch.all(input_ids[:, -1] == 29871):
-                input_ids = torch.cat(
-                    (input_ids, torch.unsqueeze(torch.Tensor([29871]).long(), dim=0).to(input_ids.device)), dim=1
-                )
-        elif isinstance(tokenizer, Qwen2TokenizerFast):
-            # do nothing here. I think...
-            pass
-        else:
-            raise ValueError(f"Unsupported `tokenizer` type = {type(tokenizer)}")
+        # === Modification: Call the specialized processing method ===
+        input_ids = self._process_input_ids(input_ids, tokenizer)
 
         # Preprocess Image
         pixel_values = image_transform(image)
@@ -80,7 +94,8 @@ class OpenVLA(PrismaticVLM):
 
         # Invoke super().generate --> taps into `GenerationMixin` which (redirects) to `forward()`
         autocast_dtype = self.llm_backbone.half_precision_dtype
-        with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.enable_mixed_precision_training):
+        device = "npu" if USE_NPU else "cuda"
+        with torch.autocast(device, dtype=autocast_dtype, enabled=self.enable_mixed_precision_training):
             # fmt: off
             generated_ids = super(PrismaticVLM, self).generate(
                 input_ids=input_ids,                            # Shape: [1, seq]
@@ -133,3 +148,15 @@ class OpenVLA(PrismaticVLM):
         unnorm_key = self._check_unnorm_key(self.norm_stats, unnorm_key)
 
         return self.norm_stats[unnorm_key]["action"]
+
+
+class VLAAdapter(OpenVLA):
+    """
+    VLA-Adapter (based on Qwen2 or other models).
+    """
+    def _process_input_ids(self, input_ids, tokenizer):
+        # VLAAdapter indeed uses Qwen2, and Qwen2 requires no special processing
+        if isinstance(tokenizer, Qwen2TokenizerFast):
+            return input_ids
+        
+        return super()._process_input_ids(input_ids, tokenizer)

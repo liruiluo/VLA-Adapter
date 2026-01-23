@@ -21,6 +21,13 @@ from libero.libero import benchmark
 
 import wandb
 
+# Check if NPU is available
+try:
+    import torch_npu
+    USE_NPU = True
+except ImportError:
+    USE_NPU = False
+
 # Append current directory so that interpreter can find experiments.robot
 sys.path.append("../..")
 from experiments.robot.libero.libero_utils import (

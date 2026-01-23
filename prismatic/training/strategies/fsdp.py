@@ -33,6 +33,12 @@ from prismatic.models.vlms import PrismaticVLM
 from prismatic.overwatch import initialize_overwatch
 from prismatic.training.strategies.base_strategy import TrainingStrategy
 
+try:
+    import torch_npu
+    USE_NPU = True
+except ImportError:
+    USE_NPU = False
+
 # Initialize Overwatch =>> Wraps `logging.Logger`
 overwatch = initialize_overwatch(__name__)
 
@@ -157,13 +163,12 @@ class FSDPStrategy(TrainingStrategy):
             )
 
         # <FSDP> => note that FSDP will automatically take care of device placement (similar to `autocast`)
-        # Support both CUDA and NPU
-        try:
-            import torch_npu
+        # Support both CUDA and NPU      
+        if USE_NPU:
             current_device = torch.npu.current_device() if torch.npu.is_available() else torch.cuda.current_device()
-        except ImportError:
+        else:
             current_device = torch.cuda.current_device()
-        
+
         self.vlm = FSDP(
             self.vlm,
             auto_wrap_policy=vlm_fsdp_wrapping_policy,

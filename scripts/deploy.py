@@ -36,7 +36,7 @@ from experiments.robot.openvla_utils import (
 from experiments.robot.robot_utils import (
     get_image_resize_size,
 )
-from prismatic.vla.constants import ACTION_DIM, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM, STOP_INDEX
+from prismatic.vla.constants import ACTION_DIM, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM
 
 
 def get_openvla_prompt(instruction: str, openvla_path: Union[str, Path]) -> str:
@@ -44,7 +44,7 @@ def get_openvla_prompt(instruction: str, openvla_path: Union[str, Path]) -> str:
 
 
 # === Server Interface ===
-class OpenVLAServer:
+class VLAAdapterServer:
     def __init__(self, cfg) -> Path:
         """
         A simple server for OpenVLA models; exposes `/act` to predict an action for a given observation + instruction.
@@ -146,7 +146,7 @@ class DeployConfig:
 
 @draccus.wrap()
 def deploy(cfg: DeployConfig) -> None:
-    server = OpenVLAServer(cfg)
+    server = VLAAdapterServer(cfg)
     server.run(cfg.host, port=cfg.port)
 
 

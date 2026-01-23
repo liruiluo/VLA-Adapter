@@ -7,7 +7,7 @@ Implementations of various action heads, which serve as alternatives to VLM sequ
 import math
 import torch
 import torch.nn as nn
-from prismatic.vla.constants import ACTION_DIM, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM, STOP_INDEX, NUM_TOKENS
+from prismatic.vla.constants import ACTION_DIM, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM, NUM_TOKENS
 
 
 

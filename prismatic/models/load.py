@@ -15,10 +15,10 @@ from huggingface_hub import HfFileSystem, hf_hub_download
 from prismatic.conf import ModelConfig
 from prismatic.models.materialize import get_llm_backbone_and_tokenizer, get_vision_backbone_and_transform
 from prismatic.models.registry import GLOBAL_REGISTRY, MODEL_REGISTRY
-from prismatic.models.vlas import OpenVLA
+from prismatic.models.vlas import OpenVLA, VLAAdapter
 from prismatic.models.vlms import PrismaticVLM
 from prismatic.overwatch import initialize_overwatch
-from prismatic.vla.action_tokenizer import ACTION_TOKENIZERS, ActionTokenizer
+from prismatic.vla.action_tokenizer import ACTION_TOKENIZERS, ActionTokenizer  # Add ACTION_TOKENIZERS
 
 # Initialize Overwatch =>> Wraps `logging.Logger`
 overwatch = initialize_overwatch(__name__)
@@ -54,8 +54,8 @@ def load(
     hf_token: Optional[str] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     load_for_training: bool = False,
-    image_sequence_len: Optional[int] = None,
-    use_flash_attention_2: Optional[bool] = None,
+    image_sequence_len: Optional[int] = None,       # (Add)
+    use_flash_attention_2: Optional[bool] = None,   # (Add)
 ) -> PrismaticVLM:
     """Loads a pretrained PrismaticVLM from either local disk or the HuggingFace Hub."""
 
@@ -91,7 +91,7 @@ def load(
         f"             Checkpoint Path =>> [underline]`{checkpoint_pt}`[/]"
     )
 
-    if image_sequence_len is None:
+    if image_sequence_len is None:      # (Add)
         if hasattr(model_cfg, "image_sequence_len"):
             image_sequence_len = model_cfg.image_sequence_len
         else:
@@ -112,7 +112,7 @@ def load(
         llm_max_length=model_cfg.get("llm_max_length", 2048),
         hf_token=hf_token,
         inference_mode=not load_for_training,
-        use_flash_attention_2=use_flash_attention_2,
+        use_flash_attention_2=use_flash_attention_2,        # (Add)
     )
 
     # Load VLM using `from_pretrained` (clobbers HF syntax... eventually should reconcile)
@@ -137,8 +137,8 @@ def load_vla(
     load_for_training: bool = False,
     step_to_load: Optional[int] = None,
     model_type: str = "pretrained",
-    image_sequence_len: Optional[int] = None,
-    use_flash_attention_2: Optional[bool] = None,
+    image_sequence_len: Optional[int] = None,       # (Add)
+    use_flash_attention_2: Optional[bool] = None,   # (Add)
 ) -> OpenVLA:
     """Loads a pretrained OpenVLA from either local disk or the HuggingFace Hub."""
 
@@ -189,7 +189,7 @@ def load_vla(
     # Load VLA Config (and corresponding base VLM `ModelConfig`) from `config.json`
     with open(config_json, "r") as f:
         vla_cfg = json.load(f)["vla"]
-        base_vlm = vla_cfg["base_vlm"]
+        base_vlm = vla_cfg["base_vlm"]      # (Add)
 
     # if base vlm is a folder, load its config.json (only works for native format!)
     # this might happen if you start a run who's base vlm is from a folder instead of from hf
@@ -215,7 +215,7 @@ def load_vla(
         f"             Checkpoint Path =>> [underline]`{checkpoint_pt}`[/]"
     )
 
-    if image_sequence_len is None:
+    if image_sequence_len is None:      # (Add)
         if hasattr(model_cfg, "image_sequence_len"):
             image_sequence_len = model_cfg.image_sequence_len
         else:
@@ -226,7 +226,7 @@ def load_vla(
     vision_backbone, image_transform = get_vision_backbone_and_transform(
         model_cfg.vision_backbone_id,
         model_cfg.image_resize_strategy,
-        image_sequence_len,
+        image_sequence_len,     # (Add)
     )
 
     # Load LLM Backbone --> note `inference_mode = True` by default when calling `load()`
@@ -240,7 +240,7 @@ def load_vla(
     )
 
     # Create Action Tokenizer
-    ac_tokenizer = vla_cfg["action_tokenizer"] if "action_tokenizer" in vla_cfg else "action_tokenizer"
+    ac_tokenizer = vla_cfg["action_tokenizer"] if "action_tokenizer" in vla_cfg else "action_tokenizer"      # (Add)
     action_tokenizer: ActionTokenizer = ACTION_TOKENIZERS[ac_tokenizer](llm_backbone.get_tokenizer())
 
     # Load VLM using `from_pretrained` (clobbers HF syntax... eventually should reconcile)

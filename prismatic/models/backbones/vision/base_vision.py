@@ -22,7 +22,7 @@ from timm.models.vision_transformer import Block, VisionTransformer
 from torch.distributed.fsdp.wrap import _module_wrap_policy, _or_policy, transformer_auto_wrap_policy
 from torchvision.transforms import Compose, Resize
 
-from prismatic.util.torch_utils import merge_two_dims, sequence_combine_call_split
+from prismatic.util.torch_utils import merge_two_dims, sequence_combine_call_split # Add
 
 
 # === Utility Functions for Monkey-Patching ===
@@ -34,7 +34,7 @@ def unpack_tuple(fn: Callable[[Any], Tuple[Any]]) -> Callable[[Any], Any]:
     return wrapper
 
 
-# === Utility Function for handling image sequences ===
+# === Utility Function for handling image sequences === Add
 def compute_sequence_patches(pixel_values: Dict, featurizers: Dict, seq_len: int):
     patches = {}
     for k in pixel_values:
@@ -55,7 +55,7 @@ class ImageTransform(Protocol):
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]: ...
 
 
-# === Special Image Transform Wrapper for sequences ===
+# === Special Image Transform Wrapper for sequences === Add
 class WrapSequenceImageTransform(ImageTransform):
     """Performs transforms and returns a tensor that with a sequence len dimension"""
 
@@ -147,7 +147,7 @@ class TimmViTBackbone(VisionBackbone, ABC):
         timm_path_or_url: str,
         image_resize_strategy: str,
         default_image_size: int = 224,
-        image_sequence_len: int = 1,
+        image_sequence_len: int = 1,                        # (Add)
         override_act_layer: Optional[str] = None,
     ) -> None:
         super().__init__(

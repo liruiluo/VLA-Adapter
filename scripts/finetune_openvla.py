@@ -105,8 +105,8 @@ class FinetuneConfig:
     # Directory Paths
     data_root_dir: Path = Path("datasets/open-x-embodiment")        # Path to Open-X dataset directory
     dataset_name: str = "droid_wipe"                                # Name of fine-tuning dataset (e.g., `droid_wipe`)
-    run_root_dir: Path = Path("runs")                               # Path to directory to store logs & checkpoints
-    adapter_tmp_dir: Path = Path("adapter-tmp")                     # Temporary directory for LoRA weights before fusing
+    run_root_dir: Path = Path("outputs")                            # Path to directory to store logs & checkpoints
+    adapter_tmp_dir: Path = Path("adapter-tmp")                     # Temporary directory for LoRA weights (deprecated)
 
     # Fine-tuning Parameters
     batch_size: int = 16                                            # Fine-tuning batch size (per device)
@@ -469,11 +469,9 @@ def finetune(cfg: FinetuneConfig) -> None:
         exp_id += "+adapter"
 
     # Start =>> Build Directories
-    run_dir = cfg.run_root_dir / exp_id
-    adapter_dir = cfg.adapter_tmp_dir / exp_id
-    os.makedirs(run_dir, exist_ok=True)
-    if cfg.training_mode == "full" and cfg.use_fsdp:
-        os.makedirs(run_dir / "checkpoints", exist_ok=True)
+    # For checkpoint saving, we'll create directories dynamically based on step number
+    base_run_dir = cfg.run_root_dir / exp_id  # Base directory (not used for saving)
+    os.makedirs(cfg.run_root_dir, exist_ok=True)  # Ensure outputs directory exists
 
     # Load model using appropriate method
     # For FSDP, load to CPU first; FSDP will handle device placement
@@ -622,9 +620,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 num_workers=0,  # Important =>> Set to 0 if using RLDS; TFDS rolls its own parallelism!
             )
 
-    # [Important] Save Dataset Statistics =>> used to de-normalize actions for inference!
-    if is_main_process:
-        save_dataset_statistics(vla_dataset.dataset_statistics, run_dir)
+    # [Important] Save Dataset Statistics =>> Will be saved with each checkpoint
 
     # Initialize Logging =>> W&B
     if is_main_process:
@@ -648,7 +644,10 @@ def finetune(cfg: FinetuneConfig) -> None:
     if cfg.training_mode == "full" and cfg.use_fsdp and train_strategy is not None:
         # FSDP Training Path with custom training loop
         # Run setup (wraps model with FSDP, sets up optimizer, etc.)
-        train_strategy.run_setup(run_dir=run_dir, n_train_examples=len(vla_dataset))
+        # Create a temporary run_dir for FSDP setup
+        temp_run_dir = cfg.run_root_dir / f".temp_{exp_id}"
+        os.makedirs(temp_run_dir, exist_ok=True)
+        train_strategy.run_setup(run_dir=temp_run_dir, n_train_examples=len(vla_dataset))
         
         # Custom training loop (instead of run_vla_training)
         import time
@@ -791,8 +790,15 @@ def finetune(cfg: FinetuneConfig) -> None:
                     if overwatch_train.is_rank_zero():
                         print(f"\n=>> Saving checkpoint at step {global_step}")
                     epoch = global_step // (len(vla_dataset) // cfg.global_batch_size)
+                    
+                    # Create checkpoint directory with step suffix
+                    if cfg.save_latest_checkpoint_only:
+                        checkpoint_dir = cfg.run_root_dir / exp_id
+                    else:
+                        checkpoint_dir = cfg.run_root_dir / f"{exp_id}--{global_step}_chkpt"
+                    
                     train_strategy.save_checkpoint(
-                        run_dir, global_step, epoch, loss.item(), only_trainable=False
+                        checkpoint_dir, global_step, epoch, loss.item(), only_trainable=False
                     )
                     if USE_NPU:
                         import torch.distributed as dist_check
@@ -807,8 +813,15 @@ def finetune(cfg: FinetuneConfig) -> None:
         if overwatch_train.is_rank_zero():
             print(f"\n=>> Training complete! Saving final checkpoint...")
         epoch = global_step // (len(vla_dataset) // cfg.global_batch_size)
+        
+        # Create final checkpoint directory
+        if cfg.save_latest_checkpoint_only:
+            final_checkpoint_dir = cfg.run_root_dir / exp_id
+        else:
+            final_checkpoint_dir = cfg.run_root_dir / f"{exp_id}--{global_step}_chkpt"
+        
         train_strategy.save_checkpoint(
-            run_dir, global_step, epoch, loss.item(), only_trainable=False
+            final_checkpoint_dir, global_step, epoch, loss.item(), only_trainable=False
         )
         
         if hasattr(overwatch, 'info'):
@@ -939,66 +952,58 @@ def finetune(cfg: FinetuneConfig) -> None:
                     optimizer.zero_grad()
                     progress.update()
 
-                    # Save Model Checkpoint =>> by default, only keeps the latest checkpoint, continually overwriting it!
+                    # Save Model Checkpoint
                     if gradient_step_idx > 0 and gradient_step_idx % cfg.save_steps == 0:
                         if is_main_process:
-                            print(f"Saving Model Checkpoint for Step {gradient_step_idx}")
+                            print(f"\nSaving Model Checkpoint for Step {gradient_step_idx}")
 
-                        # If LoRA, we first save adapter weights, then merge into full model; otherwise, default save!
-                        save_dir = adapter_dir if (cfg.use_lora and cfg.training_mode == "lora") else run_dir
-
-                        # Save Processor & Weights
-                        processor.save_pretrained(run_dir)
-                        vla.module.save_pretrained(save_dir)
-
-                        # Wait for processor and adapter weights to be saved by main process
+                        # Determine checkpoint directory based on save_latest_checkpoint_only setting
+                        if cfg.save_latest_checkpoint_only:
+                            checkpoint_dir = cfg.run_root_dir / exp_id
+                        else:
+                            checkpoint_dir = cfg.run_root_dir / f"{exp_id}--{gradient_step_idx}_chkpt"
+                        
+                        # Create checkpoint directory structure
+                        if is_main_process:
+                            os.makedirs(checkpoint_dir, exist_ok=True)
+                            if cfg.use_lora and cfg.training_mode == "lora":
+                                os.makedirs(checkpoint_dir / "lora_adapter", exist_ok=True)
+                        
                         dist.barrier()
 
-                        # Merge LoRA weights into model backbone for faster inference
-                        #   =>> Note that merging is slow and can be done post-hoc to speed up training
+                        # Save files with proper organization
+                        # 1. Save Processor to root checkpoint directory
+                        processor.save_pretrained(checkpoint_dir)
+                        
+                        # 2. Save model weights
                         if cfg.use_lora and cfg.training_mode == "lora":
-                            if cfg.use_hf_model:
-                                base_vla = AutoModelForVision2Seq.from_pretrained(
-                                    cfg.vla_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True, trust_remote_code=False
-                                )
+                            # Save LoRA adapter to lora_adapter/ subdirectory
+                            adapter_dir = checkpoint_dir / "lora_adapter"
+                            vla.module.save_pretrained(adapter_dir)
+                        else:
+                            # Save full model to root checkpoint directory
+                            vla.module.save_pretrained(checkpoint_dir)
+                        
+                        # 3. Save dataset statistics to root checkpoint directory
+                        if is_main_process:
+                            save_dataset_statistics(vla_dataset.dataset_statistics, checkpoint_dir)
+
+                        # Wait for all saves to complete
+                        dist.barrier()
+
+                        # Print confirmation
+                        if is_main_process:
+                            print(f"✓ Checkpoint saved for Step {gradient_step_idx}")
+                            print(f"  Location: {checkpoint_dir}")
+                            if cfg.use_lora and cfg.training_mode == "lora":
+                                print(f"  Structure:")
+                                print(f"    ├── lora_adapter/          (LoRA weights)")
+                                print(f"    ├── tokenizer files        (Processor)")
+                                print(f"    └── dataset_statistics.json")
                             else:
-                                # For VLA-Adapter, we need to reload the base model
-                                if USE_NPU:
-                                    device = torch.device(f"npu:{device_id}")
-                                else:
-                                    device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")
-                                _, base_vla, _ = load_vla_adapter(
-                                    vlm_path=cfg.vla_path,
-                                    config_file_path=cfg.config_file_path,
-                                    device=device,
-                                    num_images_in_input=cfg.num_images_in_input,
-                                    use_flash_attention_2=False if USE_NPU else cfg.use_flash_attention_2,
-                                )
-                            
-                            merged_vla = PeftModel.from_pretrained(base_vla, str(adapter_dir))
-                            merged_vla = merged_vla.merge_and_unload()
-                            if is_main_process:
-                                if cfg.save_latest_checkpoint_only:
-                                    # Overwrite latest checkpoint
-                                    merged_vla.save_pretrained(run_dir)
-
-                                    print(f"Saved Model Checkpoint for Step {gradient_step_idx} at: {run_dir}")
-                                else:
-                                    # Prepare to save checkpoint in new directory
-                                    checkpoint_dir = Path(str(run_dir) + f"--{gradient_step_idx}_chkpt")
-                                    os.makedirs(checkpoint_dir, exist_ok=True)
-
-                                    # Save dataset statistics to new directory
-                                    save_dataset_statistics(vla_dataset.dataset_statistics, checkpoint_dir)
-
-                                    # Save processor and model weights to new directory
-                                    processor.save_pretrained(checkpoint_dir)
-                                    merged_vla.save_pretrained(checkpoint_dir)
-
-                                    print(f"Saved Model Checkpoint for Step {gradient_step_idx} at: {checkpoint_dir}")
-
-                            # Block on Main Process Checkpointing
-                            dist.barrier()
+                                print(f"  Contents: Processor + Full Model + Dataset Statistics")
+                        
+                        dist.barrier()
 
                     # Stop training when max_steps is reached
                     if gradient_step_idx == cfg.max_steps:

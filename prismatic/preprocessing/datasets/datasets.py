@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from transformers import CodeGenTokenizerFast, LlamaTokenizerFast, PreTrainedTokenizerBase
-from transformers.models.qwen2.tokenization_qwen2_fast import Qwen2TokenizerFast
+from transformers.models.qwen2.tokenization_qwen2_fast import Qwen2TokenizerFast    # Add
 
 from prismatic.models.backbones.llm.prompting import PromptBuilder
 from prismatic.models.backbones.vision import ImageTransform
@@ -109,7 +109,7 @@ class FinetuneDataset(Dataset[Dict[str, torch.Tensor]]):
         image_dir: Path,
         image_transform: ImageTransform,
         tokenizer: PreTrainedTokenizerBase,
-        prompt_builder_fn: Type[PromptBuilder],
+        prompt_builder_fn: Type[PromptBuilder],     # Add
     ) -> None:
         super().__init__()
         self.instruct_json, self.image_dir = instruct_json, image_dir

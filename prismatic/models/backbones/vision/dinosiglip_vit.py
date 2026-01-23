@@ -19,7 +19,7 @@ from prismatic.models.backbones.vision.base_vision import (
     ImageTransform,
     LetterboxPad,
     VisionBackbone,
-    compute_sequence_patches,
+    compute_sequence_patches, # Add
     unpack_tuple,
 )
 
@@ -156,7 +156,7 @@ class DinoSigLIPViTBackbone(VisionBackbone):
         transformer_block_policy = partial(transformer_auto_wrap_policy, transformer_layer_cls={Block})
         return partial(_or_policy, policies=[vit_wrap_policy, transformer_block_policy])
 
-    def forward(self, pixel_values: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, pixel_values: Dict[str, torch.Tensor]) -> torch.Tensor: # (Add)
         """Runs the transformed image/pixel tensors through each vision backbone, returning concatenated patches."""
         if self.image_sequence_len == 1:
             dino_patches = self.dino_featurizer(pixel_values["dino"])

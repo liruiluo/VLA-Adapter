@@ -32,7 +32,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 import wandb
 
 from prismatic.models.action_heads import L1RegressionActionHead
-from prismatic.models.backbones.llm.prompting import PurePromptBuilder
+from prismatic.models.backbones.llm.prompting import PurePromptBuilder, QwenPromptBuilder, LLaMa2ChatPromptBuilder
 from prismatic.models.film_vit_wrapper import FiLMedPrismaticVisionBackbone
 from prismatic.models.projectors import ProprioProjector
 from prismatic.training.train_utils import (
@@ -43,6 +43,7 @@ from prismatic.training.train_utils import (
 )
 from prismatic.util.data_utils import PaddedCollatorForActionPrediction
 import prismatic.vla
+from prismatic.vla.constants import VLAArchitecture, ACTION_DIM, PROPRIO_DIM, NUM_ACTIONS_CHUNK, ACTION_TOKEN_BEGIN_IDX, ACTION_PROPRIO_NORMALIZATION_TYPE
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -52,8 +53,9 @@ class FinetuneConfig:
     # fmt: off
     config_file_path: str = "prismatic/extern/hf"     # Path to OpenVLA HF config/tokenizer assets
     vlm_path: str = "openvla/openvla-7b"             # Path to OpenVLA model (on HuggingFace Hub or stored locally)
-    use_minivlm: bool = False                        #
+    use_minivlm: bool = False                        # If true, use vla-adapter architecture
     resum_vla_path: str = "openvla/openvla-7b"       # Path to OpenVLA model (on HuggingFace Hub or stored locally)
+    vla_arch: VLAArchitecture = VLAArchitecture.OPENVLA # the architecture of vla
 
     # Dataset
     data_root_dir: Path = Path("datasets/rlds")      # Directory containing RLDS datasets
@@ -68,6 +70,8 @@ class FinetuneConfig:
     use_film: bool = False                           # If True, uses FiLM to infuse language inputs into visual features
     num_images_in_input: int = 1                     # Number of images in the VLA input (default: 1)
     use_proprio: bool = False                        # If True, includes robot proprioceptive state in input
+    use_wrist_img: bool = False                      # If True, includes wrist img [add][fancy_vla]
+    use_quantization: bool = False                   # If True, uses quantization
     phase1_path: str = "None"
 
     # Training configuration
@@ -110,6 +114,20 @@ class FinetuneConfig:
     use_pro_version: bool = True                             # the version number
     phase: str = "Training"
     # fmt: on
+
+def get_prompt_builder_fn(cfg: FinetuneConfig) -> Type[PurePromptBuilder]:
+    """
+    Returns the prompt builder function based on the VLA architecture.
+    """
+    prompt_builder_fn = None
+    if cfg.vla_arch == VLAArchitecture.OPENVLA:
+        prompt_builder_fn = LLaMa2ChatPromptBuilder
+    elif cfg.vla_arch == VLAArchitecture.VLA_ADAPTER:
+        prompt_builder_fn = QwenPromptBuilder
+    else:
+        prompt_builder_fn = PurePromptBuilder
+    return prompt_builder_fn
+
 
 def get_run_id(cfg) -> str:
     """
@@ -253,7 +271,7 @@ def run_forward_pass(
     Compute model forward pass and metrics for both training and validation.
 
     Args:
-        vla (OpenVLAForActionPrediction): Vision-language-action policy.
+        vla (OpenVLAForActionPrediction | VLAForActionPrediction): Vision-language-action policy.
         action_head (nn.Module): Action head module.
         noisy_action_projector (nn.Module): Noisy action projector module (only used for diffusion).
         proprio_projector (nn.Module): Proprioceptive state projector module.
@@ -629,10 +647,10 @@ def finetune(cfg: FinetuneConfig) -> None:
     assert not (cfg.use_l1_regression and cfg.use_diffusion), (
         "Cannot do both L1 regression and diffusion. Please pick one of them!"
     )
-    assert 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path, (
-        "Only support prism-qwen25-extra-dinosiglip-224px-0_5b for now."
-    )
-    assert cfg.use_minivlm, "Only support mini vlm for now."
+    # assert 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path, (
+    #     "Only support prism-qwen25-extra-dinosiglip-224px-0_5b for now."
+    # )
+    #assert cfg.use_minivlm, "Only support mini vlm for now."
     # Trim trailing forward slash ('/') in VLA path if it exists
     cfg.config_file_path = cfg.config_file_path.rstrip("/")
     print(f"Fine-tuning OpenVLA Model `{cfg.config_file_path}` on `{cfg.dataset_name}`")
@@ -657,26 +675,37 @@ def finetune(cfg: FinetuneConfig) -> None:
         device_id = torch.device(f"cuda:{device_id}")
     # Initialize wandb logging
     if distributed_state.is_main_process:
-        wandb.init(project=cfg.wandb_project, name=f"ft+{run_id}", mode="offline")
+        wandb.init(project=cfg.wandb_project, name=f"ft+{run_id}", mode="online")
 
     # Print detected constants
     print(
         "Detected constants:\n"
-        f"\tNUM_ACTIONS_CHUNK: {prismatic.vla.NUM_ACTIONS_CHUNK}\n"
-        f"\tACTION_DIM: {prismatic.vla.ACTION_DIM}\n"
-        f"\tPROPRIO_DIM: {prismatic.vla.PROPRIO_DIM}\n"
-        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {prismatic.vla.ACTION_PROPRIO_NORMALIZATION_TYPE}"
+        f"\tNUM_ACTIONS_CHUNK: {NUM_ACTIONS_CHUNK}\n"
+        f"\tACTION_DIM: {ACTION_DIM}\n"
+        f"\tPROPRIO_DIM: {PROPRIO_DIM}\n"
+        f"\tACTION_PROPRIO_NORMALIZATION_TYPE: {ACTION_PROPRIO_NORMALIZATION_TYPE}\n"
+        f"\tACTION_TOKEN_BEGIN_IDX: {ACTION_TOKEN_BEGIN_IDX}\n"
+        f"\tVLA_ARCHITECTURE: {cfg.vla_arch}\n"
     )
 
-
-    # Load processor and VLA
-    processor, vla, RAW_STATE_DICT = prismatic.vla.load_vla_adapter(
-        vlm_path=cfg.vlm_path,
-        config_file_path=cfg.config_file_path,
-        device=device_id,
-        num_images_in_input=cfg.num_images_in_input,
-        use_flash_attention_2=False if USE_NPU else None,
-    )
+    if cfg.vla_arch == VLAArchitecture.VLA_ADAPTER:
+        # Load processor and VLA
+        processor, vla, RAW_STATE_DICT = prismatic.vla.load_vla_adapter(
+            vlm_path=cfg.vlm_path,
+            config_file_path=cfg.config_file_path,
+            device=device_id,
+            num_images_in_input=cfg.num_images_in_input,
+            use_flash_attention_2=False if USE_NPU else None,
+        )
+    elif cfg.vla_arch == VLAArchitecture.OPENVLA:
+        processor, vla = prismatic.vla.load_openvla(
+            vlm_path=cfg.vlm_path,
+            config_file_path=cfg.config_file_path,
+            device=device_id,
+            use_lora=cfg.use_lora,
+            use_quantization=cfg.use_quantization,
+        )
+        RAW_STATE_DICT = None
 
     if cfg.use_lora:
         lora_config = LoraConfig(
@@ -798,25 +827,27 @@ def finetune(cfg: FinetuneConfig) -> None:
     # ---
 
     # We assume that the model takes as input one third-person camera image and 1 or 2 optional wrist camera image(s)
-    use_wrist_image = cfg.num_images_in_input > 1
+    # use_wrist_image = cfg.num_images_in_input > 1
 
     # Create training and optional validation datasets
     batch_transform = prismatic.vla.RLDSBatchTransform(
         action_tokenizer,
         processor.tokenizer,
         image_transform=processor.image_processor.apply_transform,
-        prompt_builder_fn=PurePromptBuilder,
-        use_wrist_image=use_wrist_image,
+        prompt_builder_fn=get_prompt_builder_fn(cfg),
+        use_wrist_image=cfg.use_wrist_img,
         use_proprio=cfg.use_proprio,
         use_minivlm=cfg.use_minivlm
         )
-    train_dataset = prismatic.vla.RLDSDataset(
+    train_dataset = prismatic.vla.RLDSDataset(  # // TODO: RLDSDataset has hard-coded elements related to vla-adapter
         cfg.data_root_dir,
         cfg.dataset_name,
         batch_transform,
         resize_resolution=tuple(vla.module.config.image_sizes),
         shuffle_buffer_size=cfg.shuffle_buffer_size,
         image_aug=cfg.image_aug,
+        use_wrist_image=cfg.use_wrist_img,
+        use_proprio=cfg.use_proprio
     )
     if cfg.use_val_set:
         val_dataset = prismatic.vla.RLDSDataset(
@@ -826,7 +857,9 @@ def finetune(cfg: FinetuneConfig) -> None:
             resize_resolution=tuple(vla.module.config.image_sizes),
             shuffle_buffer_size=cfg.shuffle_buffer_size // 10,
             image_aug=cfg.image_aug,
-            train=False,
+            use_wrist_image=cfg.use_wrist_img,
+            use_proprio=cfg.use_proprio,
+            train=False
         )
 
     # [Important] Save dataset statistics so that we can unnormalize actions during inference
@@ -873,7 +906,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             compute_diffusion_l1 = (cfg.use_l1_regression and batch_idx % cfg.diffusion_sample_freq == 0) or (cfg.use_diffusion and batch_idx % cfg.diffusion_sample_freq == 0)
             loss, metrics = run_forward_pass(
                 vla=vla,
-                action_head=action_head,
+                action_head=action_head if cfg.use_l1_regression else None,
                 proprio_projector=proprio_projector if cfg.use_proprio else None,
                 batch=batch,
                 action_tokenizer=action_tokenizer,
@@ -946,7 +979,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                     processor=processor,
                     proprio_projector=proprio_projector if cfg.use_proprio else None,
                     noisy_action_projector=None,
-                    action_head=action_head,
+                    action_head=action_head if cfg.use_l1_regression else None,
                     train_dataset=train_dataset,
                     distributed_state=distributed_state,
                     new_state_dict=RAW_STATE_DICT,
@@ -956,7 +989,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             if cfg.use_val_set and log_step > 0 and log_step % cfg.val_freq == 0:
                 run_validation(
                     vla=vla,
-                    action_head=action_head,
+                    action_head=action_head if cfg.use_l1_regression else None,
                     noisy_action_projector=None,
                     proprio_projector=proprio_projector if cfg.use_proprio else None,
                     val_dataloader=val_dataloader,

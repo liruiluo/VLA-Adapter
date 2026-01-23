@@ -16,7 +16,7 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 
 from prismatic.overwatch import initialize_overwatch
-from prismatic.vla.constants import ACTION_DIM, ACTION_PROPRIO_NORMALIZATION_TYPE, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM, STOP_INDEX
+from prismatic.vla.constants import ACTION_DIM, ACTION_PROPRIO_NORMALIZATION_TYPE, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM
 from prismatic.vla.datasets.rlds import obs_transforms, traj_transforms
 from prismatic.vla.datasets.rlds.utils import goal_relabeling, task_augmentation
 from prismatic.vla.datasets.rlds.utils.data_utils import (
@@ -47,7 +47,7 @@ def make_dataset_from_rlds(
     depth_obs_keys: Dict[str, Optional[str]] = {},
     state_obs_keys: List[Optional[str]] = (),
     language_key: Optional[str] = None,
-    action_proprio_normalization_type: ACTION_PROPRIO_NORMALIZATION_TYPE,
+    action_proprio_normalization_type: ACTION_PROPRIO_NORMALIZATION_TYPE, # Changed
     dataset_statistics: Optional[Union[dict, str]] = None,
     absolute_action_mask: Optional[List[bool]] = None,
     action_normalization_mask: Optional[List[bool]] = None,
@@ -231,7 +231,7 @@ def make_dataset_from_rlds(
         dataset_statistics["action"]["mask"] = np.array(action_normalization_mask)
 
     # construct the dataset
-    split = "train" if train else "val"
+    split = "train" if train else "val"  # changed
 
     dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads)
 

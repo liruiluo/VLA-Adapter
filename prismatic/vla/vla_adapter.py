@@ -1,5 +1,22 @@
+"""
+vla_adapter.py
+
+Load VLA-Adapter model from checkpoint. [Add][fancy_vla]
+"""
+
 import torch
-from transformers import AutoConfig, AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoConfig, AutoImageProcessor, AutoModelForVision2Seq, AutoProcessor
+
+from ..extern.hf.configuration_prismatic import VLAAdapterConfig
+from ..extern.hf.modeling_prismatic import VLAAdapterForActionPrediction
+from ..extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
+
+def register_vla_adapter():
+    """Register VLA-Adapter model (with L1 regression, proprio, multi-image, etc.)."""
+    AutoConfig.register("vla_adapter", VLAAdapterConfig)
+    AutoImageProcessor.register(VLAAdapterConfig, PrismaticImageProcessor)
+    AutoProcessor.register(VLAAdapterConfig, PrismaticProcessor)
+    AutoModelForVision2Seq.register(VLAAdapterConfig, VLAAdapterForActionPrediction)
 
 
 def load_vla_adapter(
@@ -9,6 +26,8 @@ def load_vla_adapter(
     num_images_in_input: int,
     use_flash_attention_2,
 ):
+    register_vla_adapter()
+    
     processor = AutoProcessor.from_pretrained(config_file_path, trust_remote_code=False)
     from prismatic.models import load
 

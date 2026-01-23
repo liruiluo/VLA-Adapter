@@ -25,6 +25,13 @@ from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 from prismatic.models import load, load_vla
 
+# Check if NPU is available
+try:
+    import torch_npu
+    USE_NPU = True
+except ImportError:
+    USE_NPU = False
+
 
 
 @dataclass
@@ -87,23 +94,54 @@ def main(cfg: ConvertConfig) -> None:
     else:
         # Load Model using HF AutoClasses
         print(f"Loading base model: {cfg.base_checkpoint}")
-        vla = AutoModelForVision2Seq.from_pretrained(
-            cfg.base_checkpoint,
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-            trust_remote_code=False,
-        )
+        
+        # For NPU: load without device_map and low_cpu_mem_usage to avoid meta tensor issues
+        if USE_NPU:
+            print("Loading to CPU (NPU compatibility mode - no device_map)")
+            vla = AutoModelForVision2Seq.from_pretrained(
+                cfg.base_checkpoint,
+                torch_dtype=torch.bfloat16,
+                trust_remote_code=False,
+            )
+        else:
+            # For CUDA: use low_cpu_mem_usage for efficiency
+            vla = AutoModelForVision2Seq.from_pretrained(
+                cfg.base_checkpoint,
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+                trust_remote_code=False,
+            )
 
-    # Load LoRA weights and merge into base model, then save final checkpoint
+    # Load LoRA weights and merge into base model
+    print("Loading LoRA adapter...")
+    merged_vla = PeftModel.from_pretrained(vla, os.path.join(cfg.lora_finetuned_checkpoint_dir, "lora_adapter"))
+    
+    # Move to NPU for faster merging (if using NPU)
+    if USE_NPU:
+        # Support ASCEND_VISIBLE_DEVICES or ASCEND_RT_VISIBLE_DEVICES environment variable
+        npu_id = int(os.environ.get("ASCEND_VISIBLE_DEVICES", os.environ.get("ASCEND_RT_VISIBLE_DEVICES", "0")))
+        device = torch.device(f"npu:{npu_id}" if torch.npu.is_available() else "cpu")
+        print(f"Moving model to {device} for faster merging...")
+        merged_vla = merged_vla.to(device)
+    
     print("Merging LoRA weights into base model...")
     start_time = time.time()
-    merged_vla = PeftModel.from_pretrained(vla, os.path.join(cfg.lora_finetuned_checkpoint_dir, "lora_adapter")).to(
-        "cuda"
-    )
     merged_vla = merged_vla.merge_and_unload()
+    print(f"Merging complete! Time elapsed (sec): {time.time() - start_time}")
+    
+    # Move back to CPU for saving (for compatibility)
+    if USE_NPU:
+        print("Moving merged model back to CPU for saving...")
+        merged_vla = merged_vla.cpu()
+    
+    # Save merged model
+    print("Saving merged model...")
+    save_start = time.time()
     merged_vla.save_pretrained(cfg.lora_finetuned_checkpoint_dir)
-    print(f"\nMerging complete! Time elapsed (sec): {time.time() - start_time}")
-    print(f"\nSaved merged model checkpoint at:\n{cfg.lora_finetuned_checkpoint_dir}")
+    print(f"Saving complete! Time elapsed (sec): {time.time() - save_start}")
+    
+    print(f"\nTotal time elapsed (sec): {time.time() - start_time}")
+    print(f"Saved merged model checkpoint at:\n{cfg.lora_finetuned_checkpoint_dir}")
 
 
 if __name__ == "__main__":

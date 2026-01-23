@@ -114,7 +114,7 @@ class PaddedCollatorForActionPrediction:
         labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
 
 
-        if self.padding_side == "left":
+        if self.padding_side == "left": # Add
             def left_pad_sequence(sequences, padding_value):
                 max_len = max(seq.size(0) for seq in sequences)
                 padded = []
@@ -143,7 +143,7 @@ class PaddedCollatorForActionPrediction:
 
         # Stack all `pixel_values` --> depending on type is torch.Tensor or Dict[str, torch.Tensor]
         if isinstance(pixel_values[0], torch.Tensor):
-            if "pixel_values_wrist" in instances[0]:
+            if "pixel_values_wrist" in instances[0]:    # Add
                 pixel_values_wrist = [instance["pixel_values_wrist"] for instance in instances]
                 pixel_values = torch.cat((torch.stack(pixel_values), torch.stack(pixel_values_wrist)), dim=1)
             else:
@@ -151,12 +151,12 @@ class PaddedCollatorForActionPrediction:
         else:
             raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values)}")
 
-        # Stack all actions
+        # Stack all actions (Add)
         actions = [torch.from_numpy(np.copy(instance["actions"])) for instance in instances]
         actions = torch.stack(actions)
 
         # Stack proprio
-        if "proprio" in instances[0]:
+        if "proprio" in instances[0]:    # Add
             proprio = [instance["proprio"] for instance in instances]
             proprio = torch.Tensor(np.squeeze(np.stack(proprio)))
         else:
@@ -164,11 +164,11 @@ class PaddedCollatorForActionPrediction:
 
         output = dict(
             pixel_values=pixel_values,
-            proprio=proprio,
+            proprio=proprio,    # Add
             input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels,
-            actions=actions,
+            actions=actions,    # Add
         )
         if dataset_names is not None:
             output["dataset_names"] = dataset_names

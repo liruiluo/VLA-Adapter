@@ -1,1 +1,1 @@
-from .openvla import OpenVLA
+from .openvla import OpenVLA, VLAAdapter
