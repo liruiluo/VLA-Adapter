@@ -1,5 +1,5 @@
 from .materialize import get_vla_dataset_and_collator
-from .openvla import register_openvla
+from .openvla import register_openvla, load_openvla
 from .action_tokenizer import ActionTokenizer
 from .constants import (
     ACTION_DIM,
@@ -12,4 +12,4 @@ from .datasets import RLDSBatchTransform, RLDSDataset
 from .datasets.rlds.utils.data_utils import save_dataset_statistics
 from .vla_adapter import load_vla_adapter
 
-register_openvla()
+# register_openvla()

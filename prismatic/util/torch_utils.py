@@ -86,7 +86,7 @@ def check_bloat16_supported() -> bool:
                 # NPU supports bfloat16
                 return True
         except ImportError:
-            pass
+            raise ImportError("torch_npu is not available!")
         
         # Check for CUDA support
         import packaging.version
@@ -105,7 +105,7 @@ def check_bloat16_supported() -> bool:
         return False
 
 
-# === Other helpers ===
+# === Other helpers === Add
 
 
 def sequence_combine_call_split(sequence: torch.Tensor, fn: Callable):

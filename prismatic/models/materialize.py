@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 from transformers import PreTrainedTokenizerBase
 
 from prismatic.models.backbones.llm import LLaMa2LLMBackbone, LLMBackbone, MistralLLMBackbone, PhiLLMBackbone
-from prismatic.models.backbones.llm.qwen25 import Qwen25LLMBackbone
+from prismatic.models.backbones.llm.qwen25 import Qwen25LLMBackbone  # Add
 from prismatic.models.backbones.vision import (
     CLIPViTBackbone,
     DinoCLIPViTBackbone,
@@ -72,7 +72,7 @@ LLM_BACKBONES = {
     # === Phi-2 Backbone ===
     "phi-2-3b": {"cls": PhiLLMBackbone, "kwargs": {}},
 
-    # === Qwen2.5 Backbone ===
+    # === Qwen2.5 Backbone === Add
     "qwen25-0_5b-pure": {"cls": Qwen25LLMBackbone, "kwargs": {}},
     "qwen25-0_5b-extra": {"cls": Qwen25LLMBackbone, "kwargs": {"num_extra_tokens": 256}},
     "qwen25-1_5b-pure": {"cls": Qwen25LLMBackbone, "kwargs": {}},
@@ -85,7 +85,7 @@ LLM_BACKBONES = {
 def get_vision_backbone_and_transform(
     vision_backbone_id: str,
     image_resize_strategy: str,
-    image_sequence_len: int,
+    image_sequence_len: int,     # (Add)
 ) -> Tuple[VisionBackbone, ImageTransform]:
     """Instantiate a Vision Backbone, returning both the nn.Module wrapper class and default Image Transform."""
     if vision_backbone_id in VISION_BACKBONES:
@@ -149,7 +149,7 @@ def get_llm_backbone_and_tokenizer(
     llm_max_length: int = 2048,
     hf_token: Optional[str] = None,
     inference_mode: bool = False,
-    use_flash_attention_2: Optional[bool] = None,
+    use_flash_attention_2: Optional[bool] = None,   # (Add)
 ) -> Tuple[LLMBackbone, PreTrainedTokenizerBase]:
     if llm_backbone_id in LLM_BACKBONES:
         llm_cfg = LLM_BACKBONES[llm_backbone_id]

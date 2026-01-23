@@ -15,6 +15,13 @@ import requests
 import tensorflow as tf
 import torch
 from huggingface_hub import HfApi, hf_hub_download
+
+# Check if NPU is available
+try:
+    import torch_npu
+    USE_NPU = True
+except ImportError:
+    USE_NPU = False
 from PIL import Image
 from transformers import AutoConfig, AutoImageProcessor, AutoModelForVision2Seq, AutoProcessor
 
@@ -36,7 +43,10 @@ from prismatic.vla.datasets.rlds.utils.data_utils import NormalizationType
 # Initialize important constants
 DATE = time.strftime("%Y_%m_%d")
 DATE_TIME = time.strftime("%Y_%m_%d-%H_%M_%S")
-DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+if USE_NPU:
+    DEVICE = torch.device("npu:0") if torch.npu.is_available() else torch.device("cpu")
+else:
+    DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 OPENVLA_IMAGE_SIZE = 224  # Standard image size expected by OpenVLA
 
 # Configure NumPy print settings

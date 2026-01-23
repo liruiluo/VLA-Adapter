@@ -13,11 +13,21 @@ from experiments.robot.openvla_utils import (
     get_vla_action,
 )
 
+# Check if NPU is available
+try:
+    import torch_npu
+    USE_NPU = True
+except ImportError:
+    USE_NPU = False
+
 # Initialize important constants
 ACTION_DIM = 7
 DATE = time.strftime("%Y_%m_%d")
 DATE_TIME = time.strftime("%Y_%m_%d-%H_%M_%S")
-DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+if USE_NPU:
+    DEVICE = torch.device("npu:0") if torch.npu.is_available() else torch.device("cpu")
+else:
+    DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 
 # Configure NumPy print settings
 np.set_printoptions(formatter={"float": lambda x: "{0:0.3f}".format(x)})
@@ -43,11 +53,15 @@ def set_seed_everywhere(seed: int) -> None:
         seed: The random seed to use
     """
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if USE_NPU:
+        torch.npu.manual_seed_all(seed)
+    else:
+        torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    if not USE_NPU:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 

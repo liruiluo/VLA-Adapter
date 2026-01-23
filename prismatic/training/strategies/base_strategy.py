@@ -31,7 +31,7 @@ try:
 except ImportError:
     USE_NPU = False
     DEVICE_TYPE = "cuda"
-from prismatic.training.train_utils import (
+from prismatic.training.train_utils import (    # Add
     compute_actions_l1_loss,
     compute_token_accuracy,
     get_current_action_mask,
@@ -198,7 +198,7 @@ class TrainingStrategy(ABC):
                 for train_idx, batch in enumerate(dataloader):
                     # [Contract] self.vlm.forward() must automatically compute `loss` and return!
                     with torch.autocast(
-                        "cuda",
+                        DEVICE_TYPE,
                         dtype=self.mixed_precision_dtype,
                         enabled=self.enable_mixed_precision_training,
                     ):

@@ -20,7 +20,7 @@ from prismatic.models.backbones.llm.prompting import PromptBuilder, QwenPromptBu
 from prismatic.models.backbones.vision import ImageTransform
 from prismatic.util.data_utils import tree_map
 from prismatic.vla.action_tokenizer import ActionTokenizer
-from prismatic.vla.constants import ACTION_DIM, ACTION_PROPRIO_NORMALIZATION_TYPE, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM, STOP_INDEX, NUM_TOKENS
+from prismatic.vla.constants import ACTION_DIM, ACTION_PROPRIO_NORMALIZATION_TYPE, ACTION_TOKEN_BEGIN_IDX, IGNORE_INDEX, NUM_ACTIONS_CHUNK, PROPRIO_DIM, NUM_TOKENS
 from prismatic.vla.datasets.rlds import make_interleaved_dataset, make_single_dataset
 from prismatic.vla.datasets.rlds.oxe import OXE_NAMED_MIXTURES, get_oxe_dataset_kwargs_and_weights
 
@@ -33,9 +33,9 @@ class RLDSBatchTransform:
     image_transform: ImageTransform
     prompt_builder_fn: Type[PromptBuilder]
     predict_stop_token: bool = True
-    use_wrist_image: bool = False
-    use_proprio: bool = False
-    use_minivlm: bool = False
+    use_wrist_image: bool = False       # Add
+    use_proprio: bool = False           # Add
+    use_minivlm: bool = False           # Add
 
 
     def __call__(self, rlds_batch: Dict[str, Any]) -> Dict[str, Any]:
@@ -51,7 +51,7 @@ class RLDSBatchTransform:
         # Get future action chunk
         future_actions = rlds_batch["action"][1:]
 
-        if self.use_minivlm:
+        if self.use_minivlm:    # Add: vla-adpter branch.
             self.prompt_builder_fn = QwenPromptBuilder
             prompt_builder = self.prompt_builder_fn("openvla")
             # Get action chunk string
@@ -154,9 +154,14 @@ class RLDSDataset(IterableDataset):
         shuffle_buffer_size: int = 256_000,
         train: bool = True,
         image_aug: bool = False,
+        use_wrist_image: bool = False,  # [Add][fancy_vla]
+        use_proprio: bool = False       # [Add][fancy_vla]
     ) -> None:
         """Lightweight wrapper around RLDS TFDS Pipeline for use with PyTorch/OpenVLA Data Loaders."""
         self.data_root_dir, self.data_mix, self.batch_transform = data_root_dir, data_mix, batch_transform
+        # Persist feature flags before any logic branches that reference them.
+        self.use_wrist_image = use_wrist_image
+        self.use_proprio = use_proprio
 
         # Configure RLDS Dataset(s)
         if self.data_mix in OXE_NAMED_MIXTURES:
@@ -166,24 +171,26 @@ class RLDSDataset(IterableDataset):
             mixture_spec = [(self.data_mix, 1.0)]
 
         # fmt: off
-        if "aloha" in self.data_mix:
+        if "aloha" in self.data_mix:    # Add
             load_camera_views = ("primary", "left_wrist", "right_wrist")
-        else:
+        elif self.use_wrist_image:
             load_camera_views = ("primary", "wrist")
+        else:   
+            load_camera_views = ("primary", )
 
         per_dataset_kwargs, weights = get_oxe_dataset_kwargs_and_weights(
             self.data_root_dir,
             mixture_spec,
-            load_camera_views=load_camera_views,
+            load_camera_views=load_camera_views,    # Changed: original: ("primary", )  [Add][fancy_vla]
             load_depth=False,
-            load_proprio=True,
+            load_proprio=self.use_proprio,    # Changed: original: False  [Add][fancy_vla]
             load_language=True,
             action_proprio_normalization_type=ACTION_PROPRIO_NORMALIZATION_TYPE,
         )
         rlds_config = dict(
             traj_transform_kwargs=dict(
                 window_size=1,                                      # If we wanted to feed / predict more than one step
-                future_action_window_size=NUM_ACTIONS_CHUNK-1,      # For action chunking
+                future_action_window_size=NUM_ACTIONS_CHUNK-1,      # For action chunking. [changed] original: 0
                 skip_unlabeled=True,                                # Skip trajectories without language labels
                 goal_relabeling_strategy="uniform",                 # Goals are currently unused
             ),

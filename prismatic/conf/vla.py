@@ -33,7 +33,7 @@ class VLAConfig(ChoiceRegistry):
     # Optimization Parameters
     epochs: int                                     # Epochs to Run (in case `max_steps` is not specified)
     max_steps: Optional[int]                        # [Optional] Max Gradient Steps to Run (overrides `epochs`)
-    save_every_n_steps: Optional[int]
+    save_every_n_steps: Optional[int]               # (Add)Save every n steps
 
     expected_world_size: int                        # Expected # of GPUs =>> allows us to gate training on hardware
     global_batch_size: int                          # Global Batch Size (divided across processes / world size)
@@ -47,10 +47,10 @@ class VLAConfig(ChoiceRegistry):
     warmup_ratio: float                             # Fraction of Steps to Warmup (for warmup LR schedulers)
 
     train_strategy: str                             # Train Strategy (default "fsdp-full-shard")
-    action_tokenizer: str
+    action_tokenizer: str                           # (Add)
 
-    image_sequence_len: int
-    use_wrist_image: bool
+    image_sequence_len: int                         # (Add) 
+    use_wrist_image: bool                           # (Add)
 
     # Enable Gradient/Activation Checkpointing (for the LLM Backbone)
     enable_gradient_checkpointing: bool = True      # Enable Gradient/Activation Checkpointing during Training
@@ -131,7 +131,7 @@ class Exp_SigLIP_224px_OXE_Magic_Soup(Exp_SigLIP_224px_Bridge):
     per_device_batch_size: int = 32
 
 
-# = [8 GPU] Qwen2.5 0.5B SigLIP 224px + OXE Magic Soup =
+# = [8 GPU] Qwen2.5 0.5B SigLIP 224px + OXE Magic Soup =  (Add)
 @dataclass
 class Exp_Qwen25_DinoSigLIP_224px_0_5B_OXE_Magic_Soup(Exp_SigLIP_224px_Bridge):
     vla_id: str = "prism-qwen25-dinosiglip-224px+0_5b+mx-oxe-magic-soup"
@@ -146,7 +146,7 @@ class Exp_Qwen25_DinoSigLIP_224px_0_5B_OXE_Magic_Soup(Exp_SigLIP_224px_Bridge):
 
 
 @dataclass
-class Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224px_0_5B_OXE_Magic_Soup):
+class Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224px_0_5B_OXE_Magic_Soup): # (Add)
     vla_id: str = "prism-qwen25-dinosiglip-224px+0_5b+mx-libero-90"
 
     data_mix: str = "libero_90"
@@ -157,13 +157,13 @@ class Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224px_0_5
 
 
 @dataclass
-class Exp_Qwen25_DinoSigLIP_224px_T2_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90):
+class Exp_Qwen25_DinoSigLIP_224px_T2_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90): # (Add)
     vla_id: str = "prism-qwen25-dinosiglip-224px-t2+0_5b+mx-libero-90"
     image_sequence_len: int = 2
 
 
 @dataclass
-class Exp_Qwen25_DinoSigLIP_224px_wrist_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90):
+class Exp_Qwen25_DinoSigLIP_224px_wrist_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90): # (Add)
     vla_id: str = "prism-qwen25-dinosiglip-224px-wrist+0_5b+mx-libero-90"
     image_sequence_len: int = 2
     use_wrist_image: bool = True
@@ -173,7 +173,7 @@ class Exp_Qwen25_DinoSigLIP_224px_wrist_0_5B_LIBERO_90(Exp_Qwen25_DinoSigLIP_224
 
 
 @dataclass
-class Exp_Qwen25_DinoSigLIP_224px_0_5B_Bridge(Exp_SigLIP_224px_Bridge):
+class Exp_Qwen25_DinoSigLIP_224px_0_5B_Bridge(Exp_SigLIP_224px_Bridge): # (Add)
     vla_id: str = "prism-qwen25-dinosiglip-224px+0_5b+mx-bridge"
     base_vlm: Union[str, Path] = "prism-qwen25-extra-dinosiglip-224px+0_5b"
 
@@ -186,7 +186,7 @@ class Exp_Qwen25_DinoSigLIP_224px_0_5B_Bridge(Exp_SigLIP_224px_Bridge):
 
 
 @dataclass
-class Exp_DinoSigLIP_224px_LIBERO_90(Exp_DinoSigLIP_224px_Bridge):
+class Exp_DinoSigLIP_224px_LIBERO_90(Exp_DinoSigLIP_224px_Bridge): # (Add)
     vla_id: str = "prism-dinosiglip-224px+mx-libero-90"
 
     data_mix: str = "libero_90"
@@ -196,7 +196,7 @@ class Exp_DinoSigLIP_224px_LIBERO_90(Exp_DinoSigLIP_224px_Bridge):
     per_device_batch_size: int = 32
 
 
-# = [64 GPU] DINO-SigLIP 224px + OXE Magic Soup++ =
+# = [64 GPU] DINO-SigLIP 224px + OXE Magic Soup++ = (Add)
 @dataclass
 class Exp_DinoSigLIP_224px_OXE_Magic_Soup_Plus(Exp_SigLIP_224px_Bridge):
     vla_id: str = "prism-dinosiglip-224px+mx-oxe-magic-soup-plus"
@@ -290,7 +290,7 @@ class VLARegistry(Enum):
     # [OpenVLA 7B] DINO + SigLIP 224px + OXE Magic Soup++
     DINOSIGLIP_224PX_MX_OXE_MAGIC_SOUP_PLUS = Exp_DinoSigLIP_224px_OXE_Magic_Soup_Plus
 
-    # [OpenVLA 0.5B] Qwen backbones
+    # [OpenVLA 0.5B] Qwen backbones (Add)
     QWEN25_DINOSIGLIP_224PX_0_5B_MX_OXE_MAGIC_SOUP = Exp_Qwen25_DinoSigLIP_224px_0_5B_OXE_Magic_Soup
     QWEN25_DINOSIGLIP_224PX_0_5B_LIBERO_90 = Exp_Qwen25_DinoSigLIP_224px_0_5B_LIBERO_90
     QWEN25_DINOSIGLIP_224PX_T2_0_5B_LIBERO_90 = Exp_Qwen25_DinoSigLIP_224px_T2_0_5B_LIBERO_90

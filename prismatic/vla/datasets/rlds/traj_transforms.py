@@ -24,7 +24,7 @@ def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int =
     """
     traj_len = tf.shape(traj["action"])[0]
     action_dim = traj["action"].shape[-1]
-    effective_traj_len = traj_len - future_action_window_size
+    effective_traj_len = traj_len - future_action_window_size   # Add: To accommodate action chunking.
     chunk_indices = tf.broadcast_to(tf.range(-window_size + 1, 1), [effective_traj_len, window_size]) + tf.broadcast_to(
         tf.range(effective_traj_len)[:, None], [effective_traj_len, window_size]
     )
@@ -39,7 +39,7 @@ def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int =
 
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
 
-    goal_timestep = tf.fill([effective_traj_len], traj_len - 1)
+    goal_timestep = tf.fill([effective_traj_len], traj_len - 1)  #
 
     floored_action_chunk_indices = tf.minimum(tf.maximum(action_chunk_indices, 0), goal_timestep[:, None])
 
